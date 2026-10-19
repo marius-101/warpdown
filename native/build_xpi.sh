@@ -3,5 +3,6 @@
 cd "$(dirname "$0")/.." && mkdir -p dist && rm -f dist/kudm.xpi && python3 -c "
 import zipfile, pathlib
 with zipfile.ZipFile('dist/kudm.xpi','w',zipfile.ZIP_DEFLATED) as z:
-    [z.write(f, f.name) for f in sorted(pathlib.Path('extension').iterdir())]"
+    for f in sorted(pathlib.Path('extension').rglob('*')):
+        if f.is_file(): z.write(f, f.relative_to('extension').as_posix())"
 echo "Built dist/kudm.xpi"
