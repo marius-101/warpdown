@@ -17,7 +17,7 @@ from PySide6.QtWidgets import (
 from . import __version__
 from .engine import probe
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
-from .util import default_download_dir, fmt_eta, fmt_size, fmt_speed
+from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed
 
 COLUMNS = ["Name", "Size", "Progress", "Speed", "ETA", "Status", "Added"]
 CATS = ["All Downloads", "Unfinished", "Finished", "Video", "Music", "Compressed",
@@ -135,6 +135,8 @@ class AddDialog(QDialog):
         self.conns = QSpinBox()
         self.conns.setRange(1, 32)
         self.conns.setValue(int(settings.value("connections", 8)))
+        self.sort = QCheckBox("Sort into category folder (Video, Music, …)")
+        self.sort.setChecked(str(settings.value("sort_by_category", "true")).lower() == "true")
         self.start_now = QCheckBox("Start immediately")
         self.start_now.setChecked(True)
         form = QFormLayout(self)
@@ -143,6 +145,7 @@ class AddDialog(QDialog):
         form.addRow("Save as:", self.name)
         form.addRow("Save to:", row)
         form.addRow("Connections:", self.conns)
+        form.addRow("", self.sort)
         form.addRow("", self.start_now)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept)
@@ -189,6 +192,8 @@ class SettingsDialog(QDialog):
         self.dir = QLineEdit(s.value("download_dir", str(default_download_dir())))
         self.conns = QSpinBox(); self.conns.setRange(1, 32)
         self.conns.setValue(int(s.value("connections", 8)))
+        self.sort = QCheckBox("Sort downloads into category folders")
+        self.sort.setChecked(str(s.value("sort_by_category", "true")).lower() == "true")
         self.active = QSpinBox(); self.active.setRange(1, 20)
         self.active.setValue(mgr.max_active)
         self.limit = QSpinBox(); self.limit.setRange(0, 1_000_000); self.limit.setSuffix(" KB/s")
@@ -196,6 +201,7 @@ class SettingsDialog(QDialog):
         self.limit.setValue(int(s.value("speed_limit_kb", 0)))
         form = QFormLayout(self)
         form.addRow("Default folder:", self.dir)
+        form.addRow("", self.sort)
         form.addRow("Connections per download:", self.conns)
         form.addRow("Simultaneous downloads:", self.active)
         form.addRow("Speed limit:", self.limit)
@@ -313,7 +319,7 @@ class MainWindow(QMainWindow):
             s.setValue("download_dir", d.dir.text())
             s.setValue("connections", d.conns.value())
             self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
-                         d.conns.value(), d.start_now.isChecked())
+                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked())
 
     def delete_selected(self):
         ids = self._selected_ids()
@@ -336,6 +342,7 @@ class MainWindow(QMainWindow):
             s.setValue("connections", d.conns.value())
             s.setValue("speed_limit_kb", d.limit.value())
             s.setValue("max_active", d.active.value())
+            s.setValue("sort_by_category", d.sort.isChecked())
             apply_settings(self.mgr)
 
     def _open_file(self, idx):
@@ -376,4 +383,10 @@ def apply_settings(mgr: DownloadManager) -> None:
     s = QSettings()
     mgr.default_connections = int(s.value("connections", 8))
     mgr.max_active = int(s.value("max_active", 3))
+    mgr.sort_by_category = str(s.value("sort_by_category", "true")).lower() == "true"
+    if mgr.sort_by_category:
+        try:
+            ensure_category_dirs(Path(s.value("download_dir", str(default_download_dir()))))
+        except OSError:
+            pass
     mgr.set_speed_limit(int(s.value("speed_limit_kb", 0)) * 1024)

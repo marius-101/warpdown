@@ -12,7 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .engine import Downloader, Job, RateLimiter, probe
-from .util import category_for, data_dir, unique_path
+from .util import category_for, data_dir, ensure_category_dirs, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
     "Queued", "Connecting", "Downloading", "Paused", "Completed", "Error")
@@ -33,6 +33,7 @@ class Item:
     category: str = "General"
     added: float = field(default_factory=time.time)
     connections: int = 8
+    sort: bool = False  # file into <directory>/<Category>/ once the file type is known
     headers: dict = field(default_factory=dict)  # referer, cookie, user-agent from the browser
 
     @property
@@ -58,6 +59,7 @@ class DownloadManager(QObject):
         self.limiter = RateLimiter(0)
         self.max_active = 3
         self.default_connections = 8
+        self.sort_by_category = True
         self._file = data_dir() / "downloads.json"
         self._finished.connect(self._on_finished)
         self._probed.connect(self._on_probed)
@@ -85,9 +87,10 @@ class DownloadManager(QObject):
 
     # ---- API --------------------------------------------------------
     def add(self, url: str, directory: str, filename: str = "", headers: dict | None = None,
-            connections: int | None = None, start: bool = True) -> Item:
+            connections: int | None = None, start: bool = True, sort: bool | None = None) -> Item:
         it = Item(url=url, directory=directory, filename=filename, headers=headers or {},
                   connections=connections or self.default_connections,
+                  sort=self.sort_by_category if sort is None else sort,
                   status=QUEUED if start else PAUSED)
         self.items[it.id] = it
         self.added.emit(it.id)
@@ -182,9 +185,19 @@ class DownloadManager(QObject):
             self._schedule()
             return
         it.url, it.size, it.resumable = res.url, res.size, res.resumable
-        if not it.filename:
-            it.filename = unique_path(Path(it.directory), res.filename).name
-        it.category = category_for(it.filename)
+        name = it.filename or res.filename
+        it.category = category_for(name)
+        if it.sort and it.category != "General":
+            it.directory = str(Path(it.directory) / it.category)   # IDM-style folder per file type
+        try:
+            Path(it.directory).mkdir(parents=True, exist_ok=True)
+        except OSError as e:
+            it.status, it.error = ERROR, str(e)
+            self.changed.emit(iid)
+            self._schedule()
+            return
+        it.sort = False  # already applied; don't nest again on retry
+        it.filename = unique_path(Path(it.directory), name).name
         self._launch(it)
 
     def _launch(self, it: Item) -> None:
