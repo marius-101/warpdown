@@ -5,8 +5,8 @@ from __future__ import annotations
 import threading
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QSettings, Qt, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QGuiApplication, QIcon
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, Qt, QUrl, Signal
+from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
@@ -100,17 +100,34 @@ class Model(QAbstractTableModel):
 
 
 class ProgressDelegate(QStyledItemDelegate):
+    """Hand-drawn progress bar: always fills left -> right, independent of the Qt style."""
+
     def paint(self, painter, option, index):
         val = index.data(Qt.UserRole)
         if val is None:
             return super().paint(painter, option, index)
-        bar = QStyleOptionProgressBar()
-        bar.rect = option.rect.adjusted(3, 4, -3, -4)
-        bar.minimum, bar.maximum, bar.progress = 0, 1000, val
-        bar.text = index.data(Qt.DisplayRole)
-        bar.textVisible = True
-        bar.state = option.state
-        QApplication.style().drawControl(QStyle.CE_ProgressBar, bar, painter)
+        pal = option.palette
+        rect = QRectF(option.rect.adjusted(4, 5, -4, -5))
+        fill = QRectF(rect.left(), rect.top(), rect.width() * max(0, min(val, 1000)) / 1000.0, rect.height())
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing)
+        painter.setPen(Qt.NoPen)
+        groove = QColor(pal.color(QPalette.Mid)); groove.setAlpha(110)
+        painter.setBrush(groove)
+        painter.drawRoundedRect(rect, 3, 3)
+        if fill.width() > 0:
+            painter.setClipRect(fill)
+            painter.setBrush(pal.color(QPalette.Highlight))
+            painter.drawRoundedRect(rect, 3, 3)
+            painter.setClipping(False)
+        text = index.data(Qt.DisplayRole) or ""
+        painter.setClipRect(fill)
+        painter.setPen(pal.color(QPalette.HighlightedText))
+        painter.drawText(rect, Qt.AlignCenter, text)
+        painter.setClipRect(QRectF(fill.right(), rect.top(), rect.width(), rect.height()))
+        painter.setPen(pal.color(QPalette.Text))
+        painter.drawText(rect, Qt.AlignCenter, text)
+        painter.restore()
 
 
 class AddDialog(QDialog):

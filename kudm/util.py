@@ -111,3 +111,44 @@ def ensure_category_dirs(base: Path) -> None:
     """Create the IDM-style category folders (Video, Music, ...) inside `base`."""
     for cat in (*CATEGORIES, "Other"):
         (Path(base) / cat).mkdir(parents=True, exist_ok=True)
+
+
+_EXT_BY_TYPE = {
+    "video/mp4": ".mp4", "video/webm": ".webm", "video/x-matroska": ".mkv", "video/quicktime": ".mov",
+    "video/x-msvideo": ".avi", "video/x-flv": ".flv", "video/mpeg": ".mpg",
+    "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/ogg": ".ogg", "audio/flac": ".flac",
+    "audio/wav": ".wav", "audio/x-wav": ".wav", "audio/aac": ".aac", "audio/webm": ".weba",
+    "application/pdf": ".pdf", "application/zip": ".zip", "application/x-7z-compressed": ".7z",
+    "application/vnd.rar": ".rar", "application/x-rar-compressed": ".rar", "application/gzip": ".gz",
+    "application/x-iso9660-image": ".iso", "application/vnd.debian.binary-package": ".deb",
+}
+
+
+def has_extension(name: str) -> bool:
+    return re.fullmatch(r"\.[A-Za-z][A-Za-z0-9]{0,4}", os.path.splitext(name)[1]) is not None
+
+
+def sniff_ext(head: bytes) -> str:
+    """Guess a file extension from its first bytes ("" if unknown)."""
+    if len(head) >= 12 and head[4:8] == b"ftyp":
+        return ".m4a" if head[8:12] in (b"M4A ", b"M4B ") else ".mp4"
+    if head[:4] == b"\x1aE\xdf\xa3":
+        return ".mkv"
+    if head[:4] == b"RIFF" and head[8:12] == b"AVI ":
+        return ".avi"
+    if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+        return ".wav"
+    if head[:3] == b"ID3" or head[:2] in (b"\xff\xfb", b"\xff\xf3", b"\xff\xf2"):
+        return ".mp3"
+    for magic, ext in ((b"OggS", ".ogg"), (b"fLaC", ".flac"), (b"%PDF", ".pdf"), (b"PK\x03\x04", ".zip"),
+                       (b"Rar!", ".rar"), (b"7z\xbc\xaf", ".7z"), (b"\x1f\x8b", ".gz"), (b"\xfd7zXZ", ".xz")):
+        if head.startswith(magic):
+            return ext
+    return ""
+
+
+def guess_extension(name: str, content_type: str = "", head: bytes = b"") -> str:
+    """Extension to append when `name` has none: from Content-Type, else from magic bytes."""
+    if has_extension(name):
+        return ""
+    return _EXT_BY_TYPE.get(content_type.split(";")[0].strip().lower(), "") or sniff_ext(head)

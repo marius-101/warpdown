@@ -20,7 +20,7 @@ import httpx
 
 from urllib.parse import urlsplit
 
-from .util import filename_from_headers
+from .util import filename_from_headers, guess_extension
 
 CHUNK = 64 * 1024
 MIN_SPLIT = 1024 * 1024  # don't split segments with less than 1 MiB left
@@ -39,6 +39,7 @@ class ProbeResult:
     filename: str
     content_type: str = ""
     hls: bool = False
+    head: bytes = b""  # first bytes of the file, for type sniffing
 
 
 def is_hls(url: str, content_type: str = "") -> bool:
@@ -49,7 +50,7 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
     h = {"User-Agent": USER_AGENT, **(headers or {})}
     with httpx.Client(follow_redirects=True, timeout=timeout, headers=h, verify=SSL_CONTEXT) as c:
         # A ranged GET is more reliable than HEAD (many servers mishandle HEAD).
-        with c.stream("GET", url, headers={"Range": "bytes=0-0"}) as r:
+        with c.stream("GET", url, headers={"Range": "bytes=0-31"}) as r:
             r.raise_for_status()
             cd = r.headers.get("content-disposition")
             ctype = r.headers.get("content-type", "")
@@ -64,7 +65,13 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             else:
                 size = int(r.headers.get("content-length", -1))
                 resumable = False
-            return ProbeResult(str(r.url), size, resumable, filename_from_headers(cd, str(r.url)), ctype)
+            fname = filename_from_headers(cd, str(r.url))
+            try:
+                head = next(r.iter_bytes(32), b"")[:32]
+            except httpx.HTTPError:
+                head = b""
+            return ProbeResult(str(r.url), size, resumable, fname + guess_extension(fname, ctype, head), ctype,
+                               head=head)
 
 
 class RateLimiter:

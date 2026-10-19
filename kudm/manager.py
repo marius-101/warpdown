@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .hls import HlsDownloader
-from .util import category_for, data_dir, ensure_category_dirs, unique_path
+from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
     "Queued", "Connecting", "Downloading", "Paused", "Completed", "Error")
@@ -191,6 +191,8 @@ class DownloadManager(QObject):
         it.url, it.size, it.resumable = res.url, res.size, res.resumable
         it.kind = "hls" if res.hls else "http"
         name = it.filename or res.filename
+        if it.filename:
+            name += guess_extension(name, res.content_type, res.head)  # e.g. a page title with no extension
         it.category = category_for(name)
         if it.sort:
             it.directory = str(Path(it.directory) / it.category)   # IDM-style folder per file type
