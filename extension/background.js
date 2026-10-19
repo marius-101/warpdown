@@ -19,10 +19,16 @@ async function sendToKudm(url, extra = {}) {
   });
 }
 
+async function note(msg) {
+  console.log("[KUDM]", msg);
+  await api.storage.local.set({ lastEvent: `${new Date().toLocaleTimeString()} ${msg}` });
+}
+note("background started");
+
 // Take over normal browser downloads.
 api.downloads.onCreated.addListener(async (d) => {
   const url = d.finalUrl || d.url;
-  console.log("[KUDM] download created", d.id, url);
+  await note("download created: " + url.slice(0, 80));
   if (!/^https?:/.test(url)) return;
   const { enabled = true } = await api.storage.local.get("enabled");
   if (!enabled) return;
@@ -30,10 +36,10 @@ api.downloads.onCreated.addListener(async (d) => {
     await api.downloads.cancel(d.id);
     await api.downloads.erase({ id: d.id });
     const r = await sendToKudm(url, { referrer: d.referrer });
-    console.log("[KUDM] host replied", r);
+    await note("host replied: " + JSON.stringify(r));
     if (!r || !r.ok) throw new Error("KUDM not reachable");
   } catch (e) {
-    console.warn("KUDM handoff failed, falling back to browser:", e);
+    await note("handoff FAILED: " + (e && e.message || e));
     api.downloads.download({ url });
   }
 });
@@ -63,6 +69,11 @@ api.tabs.onRemoved.addListener(id => delete media[id]);
 api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) delete media[id]; });
 
 api.runtime.onMessage.addListener((msg, _s, reply) => {
+  if (msg.type === "ping") {
+    api.runtime.sendNativeMessage(HOST, { action: "ping" }).then(
+      r => reply({ ok: true, r }), e => reply({ ok: false, error: String(e && e.message || e) }));
+    return true;
+  }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);
   if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer }).then(reply);
   return true;

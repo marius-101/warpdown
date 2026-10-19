@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sys
 
-from PySide6.QtCore import QSettings
+from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 
 from . import ipc
@@ -35,6 +35,11 @@ def main(argv: list[str] | None = None) -> int:
     server.listen()
 
     def handle(msg: dict) -> None:
+        # Never run a modal dialog (nested event loop) inside the socket's readyRead callback:
+        # the peer disconnects meanwhile and the socket would be freed under Qt's feet.
+        QTimer.singleShot(0, lambda: handle_now(msg))
+
+    def handle_now(msg: dict) -> None:
         if msg.get("action") == "add" and msg.get("url"):
             win.show_raise()
             win.add_dialog(msg["url"], msg.get("headers"), msg.get("filename", ""))

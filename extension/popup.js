@@ -17,3 +17,9 @@ api.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
     }
   });
 });
+
+api.storage.local.get("lastEvent").then(({ lastEvent }) => (document.getElementById("last").textContent = lastEvent ? "Last event: " + lastEvent : "No events yet (background not run?)"));
+document.getElementById("t").onclick = () => {
+  const out = document.getElementById("tr"); out.textContent = "…";
+  api.runtime.sendMessage({ type: "ping" }).then(r => (out.textContent = r.ok ? "OK: host reachable" : "FAILED: " + r.error));
+};
