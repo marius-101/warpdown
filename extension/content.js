@@ -63,13 +63,20 @@
     return out;
   }
 
+  function tracks() {
+    if (!current) return [];
+    return [...current.querySelectorAll("track")]
+      .filter(t => t.src && /^https?:/.test(t.src) && (!t.kind || /subtitles|captions/.test(t.kind)))
+      .map(t => ({ url: t.src, lang: t.srclang || "", label: t.label || "" }));
+  }
+
   function say(text) { menu.hidden = false; menu.innerHTML = ""; const d = document.createElement("div"); d.className = "msg"; d.textContent = text; menu.append(d); }
 
   btn.addEventListener("click", async e => {
     e.stopPropagation();
     say("Looking for the video…");
     let r;
-    try { r = await api.runtime.sendMessage({ type: "grab", candidates: candidates(), title: document.title, page: location.href }); }
+    try { r = await api.runtime.sendMessage({ type: "grab", candidates: candidates(), tracks: tracks(), title: document.title, page: location.href }); }
     catch (err) { return say("Extension error: " + err); }
     if (!r || r.error) return say(r && r.error || "Nothing found.");
     if (r.sent) { say("Sent to KUDM ✓"); return setTimeout(hide, 1200); }
@@ -78,7 +85,7 @@
       const d = document.createElement("div");
       d.textContent = (m.type === "hls" ? "HLS stream · " : sizeLabel(m.size)) + (m.url.split("/").pop().split("?")[0] || m.type);
       d.title = m.url;
-      d.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: location.href, filename: m.name }); hide(); };
+      d.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: location.href, filename: m.name, subs: r.subs || [] }); hide(); };
       menu.append(d);
     }
   });

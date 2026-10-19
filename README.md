@@ -12,6 +12,7 @@ An open-source, IDM-style download manager for Linux (built and tested on Kubunt
 - Browser integration (Firefox + Chromium family): captures downloads, "Download with KUDM" context menu,
   a floating **Download this video** button over page videos, and a popup listing detected video/audio streams
   (direct files and HLS/.m3u8 streams, incl. AES-128; no DRM)
+- Subtitles: saves `.vtt`/`.srt`/`.ass` files next to the video (HLS subtitle tracks, page `<track>` tags, detected subtitle requests)
 - Pure Python + Qt (PySide6); no aria2 or other system packages required
 
 ## Run

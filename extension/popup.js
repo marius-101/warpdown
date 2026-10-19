@@ -12,7 +12,7 @@ api.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
       const u = document.createElement("span"); u.className = "u"; u.title = m.url;
       u.textContent = `${m.type === "hls" ? "HLS stream " : m.size ? (m.size / 1048576).toFixed(1) + " MB " : ""}${m.url.split("/").pop().split("?")[0] || m.type}`;
       const b = document.createElement("button"); b.textContent = "Download";
-      b.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: tab.url }); window.close(); };
+      b.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: tab.url, tabId: tab.id }); window.close(); };
       row.append(u, b); box.append(row);
     }
   });

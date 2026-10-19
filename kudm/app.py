@@ -42,7 +42,7 @@ def main(argv: list[str] | None = None) -> int:
     def handle_now(msg: dict) -> None:
         if msg.get("action") == "add" and msg.get("url"):
             win.show_raise()
-            win.add_dialog(msg["url"], msg.get("headers"), msg.get("filename", ""))
+            win.add_dialog(msg["url"], msg.get("headers"), msg.get("filename", ""), msg.get("subs"))
         else:
             win.show_raise()
 

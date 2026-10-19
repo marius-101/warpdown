@@ -66,6 +66,17 @@ def parse_master(text: str, base: str) -> tuple[str, str | None] | None:
     return best[1], best[2]
 
 
+def parse_subtitle_tracks(text: str, base: str) -> list[dict]:
+    """EXT-X-MEDIA TYPE=SUBTITLES entries of a master playlist: [{url, lang, label}]."""
+    out = []
+    for l in text.splitlines():
+        if l.startswith("#EXT-X-MEDIA:"):
+            a = _attrs(l[13:])
+            if a.get("TYPE") == "SUBTITLES" and a.get("URI"):
+                out.append({"url": urljoin(base, a["URI"]), "lang": a.get("LANGUAGE", ""), "label": a.get("NAME", "")})
+    return out
+
+
 def parse_media(text: str, base: str) -> MediaPlaylist:
     seq = 0
     segs: list[Segment] = []
@@ -130,6 +141,7 @@ class HlsDownloader:
         self._segs_total = 0
         self._samples: list[tuple[float, int]] = []
         self.parts = Path(str(job.dest) + ".parts")
+        self.sub_tracks: list[dict] = []   # subtitle renditions found in the master playlist
 
     # ---- public ----
     def start(self) -> None:
@@ -182,6 +194,8 @@ class HlsDownloader:
     def _resolve(self, c: httpx.Client, url: str) -> tuple[MediaPlaylist, str | None]:
         text = self._get(c, url).decode("utf-8", "replace")
         m = parse_master(text, url)
+        if m:
+            self.sub_tracks = parse_subtitle_tracks(text, url)
         audio_url = None
         if m:
             url, audio_url = m

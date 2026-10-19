@@ -13,6 +13,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .hls import HlsDownloader
+from .subtitles import fetch_subtitle
 from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
@@ -34,6 +35,8 @@ class Item:
     category: str = "Other"
     added: float = field(default_factory=time.time)
     connections: int = 8
+    subs: list = field(default_factory=list)       # [{url, lang, label}] sent by the browser
+    sub_files: list = field(default_factory=list)  # subtitle files saved next to the video
     kind: str = "http"   # or "hls"
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
     headers: dict = field(default_factory=dict)  # referer, cookie, user-agent from the browser
@@ -53,6 +56,7 @@ class DownloadManager(QObject):
     removed = Signal(str)
     _finished = Signal(str, object)  # emitted from worker threads
     _probed = Signal(str, object, str)
+    _subs_done = Signal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -65,6 +69,7 @@ class DownloadManager(QObject):
         self._file = data_dir() / "downloads.json"
         self._finished.connect(self._on_finished)
         self._probed.connect(self._on_probed)
+        self._subs_done.connect(self._on_subs_done)
         self._load()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -91,10 +96,11 @@ class DownloadManager(QObject):
 
     # ---- API --------------------------------------------------------
     def add(self, url: str, directory: str, filename: str = "", headers: dict | None = None,
-            connections: int | None = None, start: bool = True, sort: bool | None = None) -> Item:
+            connections: int | None = None, start: bool = True, sort: bool | None = None,
+            subs: list | None = None) -> Item:
         it = Item(url=url, directory=directory, filename=filename, headers=headers or {},
                   connections=connections or self.default_connections,
-                  sort=self.sort_by_category if sort is None else sort,
+                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []),
                   status=QUEUED if start else PAUSED)
         self.items[it.id] = it
         self.added.emit(it.id)
@@ -230,6 +236,7 @@ class DownloadManager(QObject):
             if it.kind == "hls":
                 it.filename, it.size = eng.job.dest.name, eng.downloaded()
             it.status, it.downloaded = COMPLETED, max(it.size, it.downloaded)
+            self._start_subtitles(it, getattr(eng, "sub_tracks", []))
         elif eng.error:
             it.status, it.error = ERROR, eng.error
         else:
@@ -237,6 +244,35 @@ class DownloadManager(QObject):
         self.changed.emit(iid)
         self.save()
         self._schedule()
+
+    def _start_subtitles(self, it: Item, found: list) -> None:
+        tracks, seen = [], set()
+        for t in [*it.subs, *found]:
+            if t.get("url") and t["url"] not in seen:
+                seen.add(t["url"])
+                tracks.append(t)
+        if not tracks:
+            return
+        video, headers = it.path, self._browser_headers(it)
+
+        def work():
+            saved = []
+            for t in tracks[:12]:
+                try:
+                    p = fetch_subtitle(t["url"], headers, video, t.get("lang", ""), t.get("label", ""))
+                    if p:
+                        saved.append(str(p))
+                except Exception:  # noqa: BLE001  (a missing subtitle must never fail the video)
+                    pass
+            self._subs_done.emit(it.id, saved)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_subs_done(self, iid: str, saved: list) -> None:
+        it = self.items.get(iid)
+        if it:
+            it.sub_files = saved
+            self.changed.emit(iid)
+            self.save()
 
     def _tick(self) -> None:
         for iid, eng in list(self.engines.items()):

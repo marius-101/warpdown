@@ -88,7 +88,10 @@ class Model(QAbstractTableModel):
                     return fmt_eta((it.size - it.downloaded) / it.speed)
                 return ""
             if c == 5:
-                return it.status if not it.error else f"{it.status}: {it.error}"
+                if it.error:
+                    return f"{it.status}: {it.error}"
+                n = len(it.sub_files)
+                return f"{it.status} · {n} subtitle{'s' if n != 1 else ''}" if n else it.status
             if c == 6:
                 from datetime import datetime
                 return datetime.fromtimestamp(it.added).strftime("%Y-%m-%d %H:%M")
@@ -324,11 +327,13 @@ class MainWindow(QMainWindow):
         for iid in self._selected_ids():
             fn(iid)
 
-    def add_dialog(self, url: str = "", headers: dict | None = None, filename: str = ""):
+    def add_dialog(self, url: str = "", headers: dict | None = None, filename: str = "", subs: list | None = None):
         if not url:
             clip = QGuiApplication.clipboard().text().strip()
             url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
         d = AddDialog(self, url)
+        if subs:
+            d.info.setText(f"{len(subs)} subtitle file(s) will be saved next to the video")
         if filename:
             d.name.setText(filename)
         if d.exec() == QDialog.Accepted and d.url.text().strip():
@@ -336,7 +341,7 @@ class MainWindow(QMainWindow):
             s.setValue("download_dir", d.dir.text())
             s.setValue("connections", d.conns.value())
             self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
-                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked())
+                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=subs)
 
     def delete_selected(self):
         ids = self._selected_ids()

@@ -1,6 +1,7 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 const HOST = "org.kudm.host";
 const media = {}; // tabId -> [{url, type, size}]
+const subsByTab = {}; // tabId -> [{url, lang, label}] detected .vtt/.srt/.ass requests
 console.log("[KUDM] background loaded");
 
 async function cookieHeader(url) {
@@ -16,6 +17,7 @@ async function sendToKudm(url, extra = {}) {
     action: "add", url,
     headers: { cookie, referer: extra.referrer || "", user_agent: navigator.userAgent },
     filename: extra.filename || "",
+    subs: extra.subs || [],
   });
 }
 
@@ -69,6 +71,12 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   if (d.tabId < 0) return;
   const h = Object.fromEntries(d.responseHeaders.map(x => [x.name.toLowerCase(), x.value || ""]));
   const type = h["content-type"] || "";
+  const isSub = /\.(vtt|srt|ass|ssa)(\?|$)/i.test(d.url) || /text\/vtt|x-subrip|x-ssa/i.test(type);
+  if (isSub && d.statusCode < 400 && !/thumb|sprite|storyboard/i.test(d.url)) {
+    const sl = (subsByTab[d.tabId] = subsByTab[d.tabId] || []);
+    if (!sl.some(x => x.url === d.url)) sl.push({ url: d.url, lang: "", label: "" });
+    return;
+  }
   const isHls = /mpegurl/i.test(type) || /\.m3u8(\?|$)/i.test(d.url);
   if (isHls && d.statusCode < 400) {
     const l = (media[d.tabId] = media[d.tabId] || []);
@@ -82,8 +90,8 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   const list = (media[d.tabId] = media[d.tabId] || []);
   if (!list.some(m => m.url === d.url)) list.push({ url: d.url, type, size });
 }, { urls: ["<all_urls>"] }, ["responseHeaders"]);
-api.tabs.onRemoved.addListener(id => delete media[id]);
-api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) delete media[id]; });
+api.tabs.onRemoved.addListener(id => { delete media[id]; delete subsByTab[id]; });
+api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) { delete media[id]; delete subsByTab[id]; } });
 
 api.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "ping") {
@@ -102,18 +110,20 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
       return true;
     }
     const nf = m => nameFor(msg.title, m);
+    const subs = [];
+    for (const t of [...(msg.tracks || []), ...(subsByTab[tabId] || [])]) if (!subs.some(x => x.url === t.url)) subs.push(t);
     if (list.length === 1) {
-      sendToKudm(list[0].url, { referrer: msg.page, filename: nf(list[0]) }).then(
+      sendToKudm(list[0].url, { referrer: msg.page, filename: nf(list[0]), subs }).then(
         r => reply(r && r.ok ? { sent: true } : { error: "KUDM not reachable" }),
         e => reply({ error: String(e && e.message || e) }));
     } else {
       list.sort((a, b) => (b.type === "hls") - (a.type === "hls") || b.size - a.size);
       // functions can't cross the message boundary: send precomputed names instead
-      reply({ list: list.map(m => ({ ...m, name: nf(m) })), nameFor: null });
+      reply({ list: list.map(m => ({ ...m, name: nf(m) })), subs });
     }
     return true;
   }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);
-  if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer, filename: msg.filename }).then(reply);
+  if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer, filename: msg.filename, subs: msg.subs || (subsByTab[msg.tabId] || []) }).then(reply);
   return true;
 });
