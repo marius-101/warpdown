@@ -71,7 +71,7 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   const isMedia = /^(video|audio)\//.test(type) || /\.(mp4|webm|mkv|mp3|m4a|flv)(\?|$)/i.test(d.url);
   if (!isMedia || d.statusCode >= 400 || isFragment(d.url)) return;
   const size = parseInt((h["content-range"] || "").split("/")[1] || h["content-length"] || "0", 10);
-  if (size && size < 200 * 1024) return; // ignore tiny segments
+  if (!size || size < 1024 * 1024) return; // ignore tiny/unknown-size files (UI sounds, segments, trackers)
   const list = (media[d.tabId] = media[d.tabId] || []);
   if (!list.some(m => m.url === d.url)) list.push({ url: d.url, type, size });
 }, { urls: ["<all_urls>"] }, ["responseHeaders"]);
