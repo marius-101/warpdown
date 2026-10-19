@@ -18,6 +18,7 @@ async function sendToKudm(url, extra = {}) {
     headers: { cookie, referer: extra.referrer || "", user_agent: navigator.userAgent },
     filename: extra.filename || "",
     subs: extra.subs || [],
+    mode: extra.mode || "",
   });
 }
 
@@ -60,8 +61,10 @@ api.downloads.onCreated.addListener(async (d) => {
 // Right-click "Download with KUDM".
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({ id: "kudm-link", title: "Download with KUDM", contexts: ["link", "video", "audio"] });
+  api.contextMenus.create({ id: "kudm-page", title: "Download this page's video with KUDM (yt-dlp)", contexts: ["page"] });
 });
 api.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "kudm-page") return sendToKudm(info.pageUrl, { referrer: info.pageUrl, mode: "ytdlp" });
   const url = info.linkUrl || info.srcUrl;
   if (url) sendToKudm(url, { referrer: tab && tab.url });
 });
@@ -106,7 +109,10 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
     for (const u of msg.candidates || []) add(u);
     for (const m of media[tabId] || []) add(m.url, m.type, m.size);
     if (!list.length) {
-      reply({ error: "No downloadable file found. This site streams in pieces (HLS/DASH/blob), which KUDM can't grab yet." });
+      // Nothing downloadable as a plain file/HLS: let KUDM try yt-dlp on the page itself (YouTube etc.).
+      sendToKudm(msg.page, { referrer: msg.page, mode: "ytdlp" }).then(
+        r => reply(r && r.ok ? { sent: true, via: "yt-dlp" } : { error: "KUDM not reachable" }),
+        e => reply({ error: String(e && e.message || e) }));
       return true;
     }
     const nf = m => nameFor(msg.title, m);
@@ -121,6 +127,10 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
       // functions can't cross the message boundary: send precomputed names instead
       reply({ list: list.map(m => ({ ...m, name: nf(m) })), subs });
     }
+    return true;
+  }
+  if (msg.type === "ytdlp") {
+    sendToKudm(msg.url, { referrer: msg.url, mode: "ytdlp" }).then(reply, e => reply({ ok: false, error: String(e) }));
     return true;
   }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);

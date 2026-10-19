@@ -127,6 +127,7 @@ class Job:
     resumable: bool = False
     connections: int = 8
     headers: dict[str, str] = field(default_factory=dict)
+    opts: dict = field(default_factory=dict)   # extra options (used by the yt-dlp backend)
 
 
 class Downloader:

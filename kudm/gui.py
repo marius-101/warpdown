@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import threading
 import time
 from pathlib import Path
@@ -9,17 +10,18 @@ from pathlib import Path
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QPainter, QPalette
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
+    QAbstractItemView, QApplication, QComboBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
 from . import __version__
+from . import ytdlp
 from .engine import probe
-from .subtitles import default_checked, parse_langs, peek_subtitle, tag_for
+from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
-from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed
+from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed, sanitize_filename
 
 _PEEK_SLOTS = threading.Semaphore(3)
 
@@ -140,9 +142,13 @@ class ProgressDelegate(QStyledItemDelegate):
 class AddDialog(QDialog):
     probed = Signal(object, str)
     sub_info = Signal(int, object)
+    yt_ready = Signal(object, str)
 
-    def __init__(self, parent, url: str = ""):
+    def __init__(self, parent, url: str = "", headers: dict | None = None, use_ytdlp: bool = False):
         super().__init__(parent)
+        self._hdrs = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
+                      for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
+        self._yt_user_set = use_ytdlp            # don't auto-toggle if the browser already told us the mode
         self.setWindowTitle("Add Download")
         self.setMinimumWidth(520)
         self.url = QLineEdit(url)
@@ -164,6 +170,12 @@ class AddDialog(QDialog):
         self.sort.setChecked(str(settings.value("sort_by_category", "true")).lower() == "true")
         self.start_now = QCheckBox("Start immediately")
         self.start_now.setChecked(True)
+        self.use_ytdlp = QCheckBox("Video site (YouTube, Vimeo, …): use yt-dlp")
+        self.use_ytdlp.setToolTip("Lets yt-dlp find the best video + audio and merge them.")
+        self.use_ytdlp.setEnabled(ytdlp.available())
+        self.quality = QComboBox()
+        self.quality.addItems(list(ytdlp.QUALITIES))
+        self.quality.currentTextChanged.connect(self._on_quality)
         outer = QVBoxLayout(self)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
@@ -172,6 +184,10 @@ class AddDialog(QDialog):
         form.addRow("Save as:", self.name)
         form.addRow("Save to:", row)
         form.addRow("Connections:", self.conns)
+        form.addRow("", self.use_ytdlp)
+        form.addRow("Quality:", self.quality)
+        self._form = form
+        form.setRowVisible(self.quality, False)
         form.addRow("", self.sort)
         form.addRow("", self.start_now)
         self.subs_label = QLabel("Subtitles found on the page (checked ones are saved next to the video):")
@@ -194,9 +210,69 @@ class AddDialog(QDialog):
         outer.addWidget(bb)
         self.probed.connect(self._on_probed)
         self.sub_info.connect(self._on_sub_info)
+        self.yt_ready.connect(self._on_yt_ready)
+        self.use_ytdlp.clicked.connect(self._on_ytdlp_clicked)
         self.url.editingFinished.connect(self._probe)
+        if use_ytdlp and ytdlp.available():
+            self._set_ytdlp(True)
         if url:
             self._probe()
+
+    # ---- yt-dlp mode ----
+    def _set_ytdlp(self, on: bool) -> None:
+        self.use_ytdlp.setChecked(on)
+        self._form.setRowVisible(self.quality, on)
+
+    def _on_ytdlp_clicked(self, checked: bool) -> None:
+        self._yt_user_set = True
+        self._form.setRowVisible(self.quality, checked)
+        self._probe()
+
+    def _on_quality(self, text: str) -> None:
+        name = self.name.text()
+        base, ext = os.path.splitext(name)
+        if ext.lower() in (".mp4", ".mp3"):
+            self.name.setText(base + (".mp3" if text == ytdlp.AUDIO_ONLY else ".mp4"))
+
+    def _probe_ytdlp(self, u: str) -> None:
+        self.info.setText("Asking yt-dlp… (can take a few seconds)")
+
+        def work():
+            try:
+                self.yt_ready.emit(ytdlp.fetch_info(u, self._hdrs), "")
+            except Exception as e:  # noqa: BLE001
+                self.yt_ready.emit(None, str(e) or e.__class__.__name__)
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_yt_ready(self, info, err: str) -> None:
+        if info is None:
+            self.info.setText(f"yt-dlp couldn't use this page: {err}")
+            return
+        if info["live"]:
+            self.info.setText("This is a live stream; live streams aren't supported.")
+            return
+        mins, secs = divmod(int(info["duration"]), 60)
+        h = f" · up to {info['max_height']}p" if info["max_height"] else ""
+        text = f"{info['title'][:60]} — {mins}:{secs:02d}{h}"
+        if ytdlp.is_youtube(self.url.text()) and not ytdlp.js_runtime():
+            text += "\nTip: install Node.js (sudo apt install nodejs) so YouTube offers every quality."
+        self.info.setText(text)
+        ext = ".mp3" if self.quality.currentText() == ytdlp.AUDIO_ONLY else ".mp4"
+        if not self.name.text() or self.name.text().endswith((".mp4", ".mp3")):
+            self.name.setText(sanitize_filename(info["title"]) + ext)
+        wanted = parse_langs(str(QSettings().value("sub_langs", "eng,en")))
+        tracks = []
+        for t in info["subs"]:
+            if t["auto"] and not (wanted and matches_langs(t["lang"], wanted)):
+                continue          # auto-captions exist in ~150 languages: only offer the wanted ones
+            tracks.append({"url": f"ytdlp://{t['lang']}{'-auto' if t['auto'] else ''}", "lang": t["lang"],
+                           "label": t["label"], "auto": t["auto"]})
+        self.add_subs(tracks)
+
+    def ytdlp_options(self) -> dict:
+        q = self.quality.currentText()
+        return {"format": ytdlp.QUALITIES[q], "audio_only": q == ytdlp.AUDIO_ONLY,
+                "subs": [{"lang": t["lang"], "auto": bool(t.get("auto"))} for t in self.selected_subs()]}
 
     def set_subs(self, subs: list, headers: dict) -> None:
         """Checklist of subtitle tracks (page tracks now, HLS tracks once the stream is probed)."""
@@ -218,11 +294,16 @@ class AddDialog(QDialog):
             it = QListWidgetItem(f"{tag}  ·  {tail}  ·  checking…")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
             it.setCheckState(Qt.Unchecked)
+            it.setData(Qt.UserRole + 1, it.checkState().value)
             it.setToolTip(t["url"])
             self._sub_loading = True
             self.subs_list.addItem(it)
             self._sub_loading = False
             self._sub_tracks.append(t)
+
+            if t["url"].startswith("ytdlp://"):     # yt-dlp downloads these itself; nothing to preview
+                it.setText(f"{tag}  ·  {t.get('label') or tag}")
+                continue
 
             def work(i=i, url=t["url"]):
                 with _PEEK_SLOTS:                      # a few at a time: servers may throttle bursts
@@ -248,12 +329,19 @@ class AddDialog(QDialog):
         ticked = {i for i, c in zip(valid, pre) if c}
         self._sub_loading = True
         for i in range(len(self._sub_tracks)):
-            self.subs_list.item(i).setCheckState(Qt.Checked if i in ticked else Qt.Unchecked)
+            it = self.subs_list.item(i)
+            it.setCheckState(Qt.Checked if i in ticked else Qt.Unchecked)
+            it.setData(Qt.UserRole + 1, it.checkState().value)
         self._sub_loading = False
 
-    def _on_sub_changed(self, _item) -> None:
-        if not self._sub_loading:
+    def _on_sub_changed(self, item) -> None:
+        """Only a real tick/untick by the user counts as 'touched' (text updates must not)."""
+        if self._sub_loading:
+            return
+        cur = item.checkState().value
+        if item.data(Qt.UserRole + 1) != cur:
             self._sub_touched = True
+            item.setData(Qt.UserRole + 1, cur)
 
     def _on_sub_info(self, i: int, info) -> None:
         it = self.subs_list.item(i)
@@ -283,6 +371,10 @@ class AddDialog(QDialog):
         u = self.url.text().strip()
         if not u.startswith(("http://", "https://")):
             return
+        if not self._yt_user_set and ytdlp.available() and ytdlp.looks_like_video_site(u):
+            self._set_ytdlp(True)
+        if self.use_ytdlp.isChecked():
+            return self._probe_ytdlp(u)
         self.info.setText("Checking…")
 
         def work():
@@ -296,6 +388,9 @@ class AddDialog(QDialog):
         if res is None:
             self.info.setText(f"Could not check: {err}")
             return
+        if (res.content_type or "").lower().startswith("text/html") and not self._yt_user_set and ytdlp.available():
+            self._set_ytdlp(True)                          # a web page, not a file: let yt-dlp look for the video
+            return self._probe_ytdlp(self.url.text().strip())
         if getattr(res, "sub_tracks", None):
             self.add_subs(res.sub_tracks)
         size = fmt_size(res.size) if res.size > 0 else "unknown size"
@@ -307,6 +402,8 @@ class AddDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
+    yt_updated = Signal(bool, str)
+
     def __init__(self, parent, mgr: DownloadManager):
         super().__init__(parent)
         self.setWindowTitle("Settings")
@@ -330,9 +427,39 @@ class SettingsDialog(QDialog):
         form.addRow("Simultaneous downloads:", self.active)
         form.addRow("Speed limit:", self.limit)
         form.addRow("Subtitle languages:", self.sublangs)
+        self.ytlabel = QLabel(f"yt-dlp {ytdlp.version()}" if ytdlp.available() else "yt-dlp is not installed")
+        self.ytbtn = QPushButton("Update yt-dlp")
+        self.ytbtn.setEnabled(ytdlp.available())
+        self.ytbtn.clicked.connect(self._update_ytdlp)
+        self.yt_updated.connect(self._on_yt_updated)
+        yrow = QHBoxLayout()
+        yrow.addWidget(self.ytlabel, 1)
+        yrow.addWidget(self.ytbtn)
+        form.addRow("Video sites:", yrow)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
         form.addRow(bb)
+
+
+def _settings_update_methods():
+    def _update_ytdlp(self):
+        self.ytbtn.setEnabled(False)
+        self.ytlabel.setText("Updating yt-dlp…")
+
+        def work():
+            try:
+                self.yt_updated.emit(*ytdlp.update())
+            except Exception as e:  # noqa: BLE001
+                self.yt_updated.emit(False, str(e))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _on_yt_updated(self, ok: bool, msg: str):
+        self.ytbtn.setEnabled(True)
+        self.ytlabel.setText(f"yt-dlp {ytdlp.version()}" + ("" if ok else f" — update failed: {msg[:60]}"))
+    return _update_ytdlp, _on_yt_updated
+
+
+SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated = _settings_update_methods()
 
 
 class MainWindow(QMainWindow):
@@ -432,11 +559,12 @@ class MainWindow(QMainWindow):
         for iid in self._selected_ids():
             fn(iid)
 
-    def add_dialog(self, url: str = "", headers: dict | None = None, filename: str = "", subs: list | None = None):
+    def add_dialog(self, url: str = "", headers: dict | None = None, filename: str = "", subs: list | None = None,
+                   mode: str = ""):
         if not url:
             clip = QGuiApplication.clipboard().text().strip()
             url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
-        d = AddDialog(self, url)
+        d = AddDialog(self, url, headers or {}, use_ytdlp=(mode == "ytdlp"))
         d.set_subs(subs or [], headers or {})
         if filename:
             d.name.setText(filename)
@@ -444,6 +572,11 @@ class MainWindow(QMainWindow):
             s = QSettings()
             s.setValue("download_dir", d.dir.text())
             s.setValue("connections", d.conns.value())
+            if d.use_ytdlp.isChecked():
+                self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers, d.conns.value(),
+                             d.start_now.isChecked(), sort=d.sort.isChecked(), auto_subs=False, kind="ytdlp",
+                             opts=d.ytdlp_options())
+                return
             self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
                          d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs(),
                          auto_subs=False)

@@ -30,3 +30,11 @@ api.permissions.contains({ origins: ["<all_urls>"] }).then(ok => {
   document.getElementById("grant").onclick = () =>
     api.permissions.request({ origins: ["<all_urls>"] }).then(g => { if (g) location.reload(); });
 }).catch(() => {});
+
+document.getElementById("yt").onclick = async () => {
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  const out = document.getElementById("ytr"); out.textContent = "…";
+  api.runtime.sendMessage({ type: "ytdlp", url: tab.url }).then(
+    r => { out.textContent = r && r.ok ? "Sent to KUDM ✓" : "Failed: " + ((r && r.error) || "KUDM not reachable"); },
+    e => { out.textContent = "Failed: " + e; });
+};

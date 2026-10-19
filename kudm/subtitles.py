@@ -44,13 +44,14 @@ def _segments(playlist: str, base: str) -> list[str]:
     return [urljoin(base, l.strip()) for l in playlist.splitlines() if l.strip() and not l.startswith("#")]
 
 
-_KIND = re.compile(r"\b(sdh|cc|hi|captions?|signs?|songs?|forced|commentary)\b", re.I)
+_KIND = re.compile(r"\b(sdh|cc|hi|captions?|signs?|songs?|forced|commentary|auto(?:-generated|matic)?)\b", re.I)
 
 
 def track_kind(label: str) -> str:
     """'sdh' / 'signs' / 'forced' ... if the track's label says it isn't the plain full dialogue, else ''."""
     m = _KIND.search(label or "")
-    return m.group(1).lower() if m else ""
+    k = m.group(1).lower() if m else ""
+    return "auto" if k.startswith("auto") else k
 
 
 def tag_for(lang: str, label: str, url: str) -> str:

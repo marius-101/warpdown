@@ -13,6 +13,9 @@ An open-source, IDM-style download manager for Linux (built and tested on Kubunt
   a floating **Download this video** button over page videos, and a popup listing detected video/audio streams
   (direct files and HLS/.m3u8 streams, incl. AES-128; no DRM)
 - Subtitles: saves `.vtt`/`.srt`/`.ass` files next to the video (HLS subtitle tracks, page `<track>` tags, detected subtitle requests)
+- **yt-dlp mode** for YouTube, Vimeo and other video sites: pick quality (best / 1080p / … / audio-only MP3), save
+  subtitles, H.264/AAC MP4 output. The browser button falls back to it automatically when a page has no plain file
+  or HLS stream. Update it from Settings (sites change often); install Node.js for full YouTube quality
 - Pure Python + Qt (PySide6); no aria2 or other system packages required
 
 ## Run
@@ -35,7 +38,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest
 ```
 
 ## Roadmap
-DASH (.mpd) support, yt-dlp mode for YouTube-style sites, scheduler, site logins, per-site rules, checksum verification,
+DASH (.mpd) support, scheduler, site logins, per-site rules, checksum verification,
 batch/URL-pattern downloads, auto-extract, packaging (.deb / Flatpak).
 
 License: MIT

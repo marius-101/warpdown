@@ -14,6 +14,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .hls import HlsDownloader
 from .subtitles import fetch_subtitle, matches_langs, tag_for
+from .ytdlp import YtdlpDownloader
 from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
@@ -38,7 +39,9 @@ class Item:
     subs: list = field(default_factory=list)       # [{url, lang, label}] sent by the browser
     auto_subs: bool = True    # also save subtitle tracks found in the HLS playlist (False = user chose in the dialog)
     sub_files: list = field(default_factory=list)  # subtitle files saved next to the video
-    kind: str = "http"   # or "hls"
+    kind: str = "http"   # "http", "hls" or "ytdlp"
+    opts: dict = field(default_factory=dict)   # yt-dlp options chosen in the dialog (quality, subtitles)
+    prepared: bool = False   # destination folder/name already decided (yt-dlp items)
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
     headers: dict = field(default_factory=dict)  # referer, cookie, user-agent from the browser
 
@@ -99,10 +102,10 @@ class DownloadManager(QObject):
     # ---- API --------------------------------------------------------
     def add(self, url: str, directory: str, filename: str = "", headers: dict | None = None,
             connections: int | None = None, start: bool = True, sort: bool | None = None,
-            subs: list | None = None, auto_subs: bool = True) -> Item:
+            subs: list | None = None, auto_subs: bool = True, kind: str = "http", opts: dict | None = None) -> Item:
         it = Item(url=url, directory=directory, filename=filename, headers=headers or {},
                   connections=connections or self.default_connections,
-                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []), auto_subs=auto_subs,
+                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []), auto_subs=auto_subs, kind=kind, opts=dict(opts or {}),
                   status=QUEUED if start else PAUSED)
         self.items[it.id] = it
         self.added.emit(it.id)
@@ -168,6 +171,17 @@ class DownloadManager(QObject):
                 self._begin(it)
 
     def _begin(self, it: Item) -> None:
+        if it.kind == "ytdlp":
+            if not it.prepared:
+                err = self._prepare_destination(it, it.filename or "video.mp4")
+                if err:
+                    it.status, it.error = ERROR, err
+                    self.changed.emit(it.id)
+                    self._schedule()
+                    return
+                it.prepared = True
+            self._launch(it)
+            return
         if it.filename and (it.size > 0 or it.kind == "hls") and it.url:
             self._launch(it)
             return
@@ -201,23 +215,30 @@ class DownloadManager(QObject):
         name = it.filename or res.filename
         if it.filename:
             name += guess_extension(name, res.content_type, res.head)  # e.g. a page title with no extension
+        err = self._prepare_destination(it, name)
+        if err:
+            it.status, it.error = ERROR, err
+            self.changed.emit(iid)
+            self._schedule()
+            return
+        self._launch(it)
+
+    def _prepare_destination(self, it: Item, name: str) -> str:
+        """Pick category folder + unique filename. Returns an error message, or '' on success."""
         it.category = category_for(name)
         if it.sort:
             it.directory = str(Path(it.directory) / it.category)   # IDM-style folder per file type
         try:
             Path(it.directory).mkdir(parents=True, exist_ok=True)
         except OSError as e:
-            it.status, it.error = ERROR, str(e)
-            self.changed.emit(iid)
-            self._schedule()
-            return
+            return str(e)
         it.sort = False  # already applied; don't nest again on retry
         it.filename = unique_path(Path(it.directory), name).name
-        self._launch(it)
+        return ""
 
     def _launch(self, it: Item) -> None:
-        job = Job(it.url, it.path, it.size, it.resumable, it.connections, self._browser_headers(it))
-        cls = HlsDownloader if it.kind == "hls" else Downloader
+        job = Job(it.url, it.path, it.size, it.resumable, it.connections, self._browser_headers(it), it.opts)
+        cls = {"hls": HlsDownloader, "ytdlp": YtdlpDownloader}.get(it.kind, Downloader)
         eng = cls(job, self.limiter, on_finish=lambda d, i=it.id: self._finished.emit(i, d))
         self.engines[it.id] = eng
         it.status = DOWNLOADING
@@ -235,10 +256,14 @@ class DownloadManager(QObject):
             return
         it.speed = 0.0
         if eng.done:
-            if it.kind == "hls":
+            if it.kind in ("hls", "ytdlp"):
                 it.filename, it.size = eng.job.dest.name, eng.downloaded()
+                it.category = category_for(it.filename)
             it.status, it.downloaded = COMPLETED, max(it.size, it.downloaded)
-            self._start_subtitles(it, getattr(eng, "sub_tracks", []))
+            if it.kind == "ytdlp":
+                it.sub_files = list(eng.sub_files)    # yt-dlp already saved them next to the video
+            else:
+                self._start_subtitles(it, getattr(eng, "sub_tracks", []))
         elif eng.error:
             it.status, it.error = ERROR, eng.error
         else:
@@ -282,6 +307,6 @@ class DownloadManager(QObject):
             it = self.items.get(iid)
             if it and it.status == DOWNLOADING:
                 it.downloaded, it.speed = eng.snapshot()
-                if it.kind == "hls":
+                if it.kind in ("hls", "ytdlp"):
                     it.size = eng.estimated_size()
                 self.changed.emit(iid)
