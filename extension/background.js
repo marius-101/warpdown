@@ -22,12 +22,13 @@ async function sendToKudm(url, extra = {}) {
 const EXT = { "video/mp4": ".mp4", "video/webm": ".webm", "video/x-matroska": ".mkv", "video/quicktime": ".mov",
   "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/aac": ".aac" };
 function nameFor(title, m) {
+  if (m.type === "hls") m = { ...m, url: "x.mp4" };
   let ext = (m.url.split("?")[0].match(/\.(mp4|webm|mkv|mov|flv|mp3|m4a|ogg|aac)$/i) || [])[0] || EXT[(m.type || "").split(";")[0]] || "";
   const base = (title || "video").replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim().slice(0, 120) || "video";
   return base + ext;
 }
 // Chunked streaming URLs (YouTube-style &range=…) are fragments, not whole files.
-const isFragment = u => /[?&](range|bytes|sq|seg)=/i.test(u) || /\/videoplayback/.test(u);
+const isFragment = u => /[?&](range|bytes|sq|seg)=/i.test(u) || /\/videoplayback/.test(u) || /\.(ts|m4s|aac)(\?|$)/i.test(u);
 
 async function note(msg) {
   console.log("[KUDM]", msg);
@@ -68,7 +69,13 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   if (d.tabId < 0) return;
   const h = Object.fromEntries(d.responseHeaders.map(x => [x.name.toLowerCase(), x.value || ""]));
   const type = h["content-type"] || "";
-  const isMedia = /^(video|audio)\//.test(type) || /\.(mp4|webm|mkv|mp3|m4a|flv)(\?|$)/i.test(d.url);
+  const isHls = /mpegurl/i.test(type) || /\.m3u8(\?|$)/i.test(d.url);
+  if (isHls && d.statusCode < 400) {
+    const l = (media[d.tabId] = media[d.tabId] || []);
+    if (!l.some(m => m.url === d.url)) l.push({ url: d.url, type: "hls", size: 0 });
+    return;
+  }
+  const isMedia = (/^(video|audio)\//.test(type) && !/mp2t/.test(type)) || /\.(mp4|webm|mkv|mp3|m4a|flv)(\?|$)/i.test(d.url);
   if (!isMedia || d.statusCode >= 400 || isFragment(d.url)) return;
   const size = parseInt((h["content-range"] || "").split("/")[1] || h["content-length"] || "0", 10);
   if (!size || size < 1024 * 1024) return; // ignore tiny/unknown-size files (UI sounds, segments, trackers)
@@ -100,7 +107,7 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
         r => reply(r && r.ok ? { sent: true } : { error: "KUDM not reachable" }),
         e => reply({ error: String(e && e.message || e) }));
     } else {
-      list.sort((a, b) => b.size - a.size);
+      list.sort((a, b) => (b.type === "hls") - (a.type === "hls") || b.size - a.size);
       // functions can't cross the message boundary: send precomputed names instead
       reply({ list: list.map(m => ({ ...m, name: nf(m) })), nameFor: null });
     }

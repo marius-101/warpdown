@@ -18,6 +18,8 @@ from typing import Callable
 
 import httpx
 
+from urllib.parse import urlsplit
+
 from .util import filename_from_headers
 
 CHUNK = 64 * 1024
@@ -36,6 +38,11 @@ class ProbeResult:
     resumable: bool
     filename: str
     content_type: str = ""
+    hls: bool = False
+
+
+def is_hls(url: str, content_type: str = "") -> bool:
+    return urlsplit(url).path.lower().endswith(".m3u8") or "mpegurl" in content_type.lower()
 
 
 def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0) -> ProbeResult:
@@ -46,6 +53,10 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             r.raise_for_status()
             cd = r.headers.get("content-disposition")
             ctype = r.headers.get("content-type", "")
+            if is_hls(str(r.url), ctype):
+                base = os.path.splitext(filename_from_headers(cd, str(r.url)))[0]
+                name = "video" if base.lower() in ("index", "master", "playlist", "chunklist", "") else base
+                return ProbeResult(str(r.url), -1, False, name + ".mp4", ctype, hls=True)
             if r.status_code == 206:
                 cr = r.headers.get("content-range", "")
                 size = int(cr.rsplit("/", 1)[-1]) if cr.rsplit("/", 1)[-1].isdigit() else -1

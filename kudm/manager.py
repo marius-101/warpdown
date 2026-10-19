@@ -11,7 +11,8 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
-from .engine import Downloader, Job, RateLimiter, probe
+from .engine import Downloader, Job, RateLimiter, is_hls, probe
+from .hls import HlsDownloader
 from .util import category_for, data_dir, ensure_category_dirs, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
@@ -33,6 +34,7 @@ class Item:
     category: str = "Other"
     added: float = field(default_factory=time.time)
     connections: int = 8
+    kind: str = "http"   # or "hls"
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
     headers: dict = field(default_factory=dict)  # referer, cookie, user-agent from the browser
 
@@ -158,7 +160,7 @@ class DownloadManager(QObject):
                 self._begin(it)
 
     def _begin(self, it: Item) -> None:
-        if it.filename and it.size > 0:
+        if it.filename and (it.size > 0 or it.kind == "hls") and it.url:
             self._launch(it)
             return
         it.status = PROBING
@@ -187,6 +189,7 @@ class DownloadManager(QObject):
             self._schedule()
             return
         it.url, it.size, it.resumable = res.url, res.size, res.resumable
+        it.kind = "hls" if res.hls else "http"
         name = it.filename or res.filename
         it.category = category_for(name)
         if it.sort:
@@ -204,7 +207,8 @@ class DownloadManager(QObject):
 
     def _launch(self, it: Item) -> None:
         job = Job(it.url, it.path, it.size, it.resumable, it.connections, self._browser_headers(it))
-        eng = Downloader(job, self.limiter, on_finish=lambda d, i=it.id: self._finished.emit(i, d))
+        cls = HlsDownloader if it.kind == "hls" else Downloader
+        eng = cls(job, self.limiter, on_finish=lambda d, i=it.id: self._finished.emit(i, d))
         self.engines[it.id] = eng
         it.status = DOWNLOADING
         self.changed.emit(it.id)
@@ -221,6 +225,8 @@ class DownloadManager(QObject):
             return
         it.speed = 0.0
         if eng.done:
+            if it.kind == "hls":
+                it.filename, it.size = eng.job.dest.name, eng.downloaded()
             it.status, it.downloaded = COMPLETED, max(it.size, it.downloaded)
         elif eng.error:
             it.status, it.error = ERROR, eng.error
@@ -235,4 +241,6 @@ class DownloadManager(QObject):
             it = self.items.get(iid)
             if it and it.status == DOWNLOADING:
                 it.downloaded, it.speed = eng.snapshot()
+                if it.kind == "hls":
+                    it.size = eng.estimated_size()
                 self.changed.emit(iid)

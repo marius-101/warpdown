@@ -11,7 +11,7 @@ An open-source, IDM-style download manager for Linux (built and tested on Kubunt
   files sorted into them; tray icon, completion notifications
 - Browser integration (Firefox + Chromium family): captures downloads, "Download with KUDM" context menu,
   a floating **Download this video** button over page videos, and a popup listing detected video/audio streams
-  (direct file streams only; HLS/DASH/blob streams are on the roadmap)
+  (direct files and HLS/.m3u8 streams, incl. AES-128; no DRM)
 - Pure Python + Qt (PySide6); no aria2 or other system packages required
 
 ## Run
@@ -34,7 +34,7 @@ QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest
 ```
 
 ## Roadmap
-HLS/DASH (m3u8) video grabbing, scheduler, site logins, per-site rules, checksum verification,
+DASH (.mpd) support, yt-dlp mode for YouTube-style sites, scheduler, site logins, per-site rules, checksum verification,
 batch/URL-pattern downloads, auto-extract, packaging (.deb / Flatpak).
 
 License: MIT

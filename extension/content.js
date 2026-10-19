@@ -76,7 +76,7 @@
     menu.innerHTML = "";
     for (const m of r.list) {
       const d = document.createElement("div");
-      d.textContent = sizeLabel(m.size) + (m.url.split("/").pop().split("?")[0] || m.type);
+      d.textContent = (m.type === "hls" ? "HLS stream · " : sizeLabel(m.size)) + (m.url.split("/").pop().split("?")[0] || m.type);
       d.title = m.url;
       d.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: location.href, filename: m.name }); hide(); };
       menu.append(d);
