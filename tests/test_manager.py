@@ -1,7 +1,6 @@
 import os
 import time
 
-from PySide6.QtWidgets import QApplication
 
 from kudm.manager import COMPLETED, DownloadManager
 from tests.rangeserver import make_server
@@ -9,9 +8,9 @@ from tests.rangeserver import make_server
 PAYLOAD = os.urandom(5 * 1024 * 1024 + 7)
 
 
-def test_manager_end_to_end(tmp_path, monkeypatch):
+def test_manager_end_to_end(qapp, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
-    app = QApplication.instance() or QApplication([])
+    app = qapp
     srv, url = make_server(PAYLOAD)
     m = DownloadManager()
     it = m.add(url, str(tmp_path))

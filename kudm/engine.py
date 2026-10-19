@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 import threading
 import time
 from dataclasses import dataclass, field
@@ -22,6 +23,9 @@ from .util import filename_from_headers
 CHUNK = 64 * 1024
 MIN_SPLIT = 1024 * 1024  # don't split segments with less than 1 MiB left
 UNKNOWN = 1 << 62
+# One shared TLS context, built once at import time on the main thread. Creating contexts
+# concurrently from many threads (each loading the CA bundle) segfaults in OpenSSL here.
+SSL_CONTEXT = ssl.create_default_context()
 USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) KUDM/0.1"
 
 
@@ -36,7 +40,7 @@ class ProbeResult:
 
 def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0) -> ProbeResult:
     h = {"User-Agent": USER_AGENT, **(headers or {})}
-    with httpx.Client(follow_redirects=True, timeout=timeout, headers=h) as c:
+    with httpx.Client(follow_redirects=True, timeout=timeout, headers=h, verify=SSL_CONTEXT) as c:
         # A ranged GET is more reliable than HEAD (many servers mishandle HEAD).
         with c.stream("GET", url, headers={"Range": "bytes=0-0"}) as r:
             r.raise_for_status()
@@ -249,7 +253,7 @@ class Downloader:
         job = self.job
         headers = {"User-Agent": USER_AGENT, **job.headers}
         try:
-            with httpx.Client(follow_redirects=True, headers=headers,
+            with httpx.Client(follow_redirects=True, headers=headers, verify=SSL_CONTEXT,
                               timeout=httpx.Timeout(30.0, connect=15.0)) as client:
                 while not self._stop.is_set():
                     seg = self._claim()

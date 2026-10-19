@@ -43,6 +43,7 @@ def main(argv: list[str] | None = None) -> int:
 
     server.message.connect(handle)
     app.aboutToQuit.connect(mgr.shutdown)
+    app.aboutToQuit.connect(server.close)
     win.show()
     for u in urls:
         win.add_dialog(u)

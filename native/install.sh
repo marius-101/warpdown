@@ -36,6 +36,21 @@ for d in google-chrome chromium BraveSoftware/Brave-Browser vivaldi microsoft-ed
   write_manifest "$HOME/.config/$d/NativeMessagingHosts" chrome
 done
 
+# Flatpak Firefox: the sandbox cannot run host binaries directly, so go through flatpak-spawn.
+FP="$HOME/.var/app/org.mozilla.firefox"
+if [ -d "$FP" ]; then
+  mkdir -p "$FP/.mozilla/native-messaging-hosts"
+  cat > "$FP/.mozilla/kudm-host-flatpak" <<FPW
+#!/bin/sh
+exec flatpak-spawn --host "$WRAPPER"
+FPW
+  chmod +x "$FP/.mozilla/kudm-host-flatpak"
+  cat > "$FP/.mozilla/native-messaging-hosts/$NAME.json" <<JSON
+{"name":"$NAME","description":"KUDM native host","path":"$FP/.mozilla/kudm-host-flatpak","type":"stdio","allowed_extensions":["$FF_ID"]}
+JSON
+  echo "Flatpak Firefox detected. Also run once:  flatpak override --user --talk-name=org.freedesktop.Flatpak org.mozilla.firefox"
+fi
+
 mkdir -p "$HOME/.local/share/applications"
 cat > "$HOME/.local/share/applications/kudm.desktop" <<DESK
 [Desktop Entry]

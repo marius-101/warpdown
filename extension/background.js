@@ -1,6 +1,7 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
 const HOST = "org.kudm.host";
 const media = {}; // tabId -> [{url, type, size}]
+console.log("[KUDM] background loaded");
 
 async function cookieHeader(url) {
   try {
@@ -21,6 +22,7 @@ async function sendToKudm(url, extra = {}) {
 // Take over normal browser downloads.
 api.downloads.onCreated.addListener(async (d) => {
   const url = d.finalUrl || d.url;
+  console.log("[KUDM] download created", d.id, url);
   if (!/^https?:/.test(url)) return;
   const { enabled = true } = await api.storage.local.get("enabled");
   if (!enabled) return;
@@ -28,6 +30,7 @@ api.downloads.onCreated.addListener(async (d) => {
     await api.downloads.cancel(d.id);
     await api.downloads.erase({ id: d.id });
     const r = await sendToKudm(url, { referrer: d.referrer });
+    console.log("[KUDM] host replied", r);
     if (!r || !r.ok) throw new Error("KUDM not reachable");
   } catch (e) {
     console.warn("KUDM handoff failed, falling back to browser:", e);
