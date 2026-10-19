@@ -63,3 +63,14 @@ def test_parsers():
         parse_media('#EXTM3U\n#EXT-X-KEY:METHOD=SAMPLE-AES,URI="k"\n#EXTINF:2,\ns.ts\n#EXT-X-ENDLIST\n', "http://h/")
     assert parse_media("#EXTM3U\n#EXTINF:2,\ns.ts\n", "http://h/").live
     assert is_hls("http://h/x/index.m3u8?token=1") and not is_hls("http://h/x.mp4")
+
+
+def test_playlist_without_m3u8_extension_is_detected(tmp_path):
+    """Real-world case: URL like /cdn/abc?t.m3u8 served as text/plain; detect by content."""
+    from tests.rangeserver import make_server
+    body = b"#EXTM3U\n#EXT-X-VERSION:3\n#EXT-X-STREAM-INF:BANDWIDTH=1000\nlow.m3u8\n"
+    srv, url = make_server(body)          # serves everything as a plain 200/206 file
+    p = probe(url)
+    assert p.hls and p.filename.endswith(".mp4")
+    srv.shutdown()
+    assert is_hls("https://h/cdn/abc?t.m3u8&v.m3u8")

@@ -43,7 +43,8 @@ class ProbeResult:
 
 
 def is_hls(url: str, content_type: str = "") -> bool:
-    return urlsplit(url).path.lower().endswith(".m3u8") or "mpegurl" in content_type.lower()
+    u = urlsplit(url)
+    return u.path.lower().endswith(".m3u8") or ".m3u8" in u.query.lower() or "mpegurl" in content_type.lower()
 
 
 def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0) -> ProbeResult:
@@ -54,8 +55,13 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             r.raise_for_status()
             cd = r.headers.get("content-disposition")
             ctype = r.headers.get("content-type", "")
-            if is_hls(str(r.url), ctype):
-                base = os.path.splitext(filename_from_headers(cd, str(r.url)))[0]
+            try:
+                head = next(r.iter_bytes(32), b"")[:32]
+            except httpx.HTTPError:
+                head = b""
+            fname = filename_from_headers(cd, str(r.url))
+            if is_hls(str(r.url), ctype) or head.lstrip(b"\xef\xbb\xbf").startswith(b"#EXTM3U"):
+                base = os.path.splitext(fname)[0]
                 name = "video" if base.lower() in ("index", "master", "playlist", "chunklist", "") else base
                 return ProbeResult(str(r.url), -1, False, name + ".mp4", ctype, hls=True)
             if r.status_code == 206:
@@ -65,11 +71,6 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             else:
                 size = int(r.headers.get("content-length", -1))
                 resumable = False
-            fname = filename_from_headers(cd, str(r.url))
-            try:
-                head = next(r.iter_bytes(32), b"")[:32]
-            except httpx.HTTPError:
-                head = b""
             return ProbeResult(str(r.url), size, resumable, fname + guess_extension(fname, ctype, head), ctype,
                                head=head)
 
