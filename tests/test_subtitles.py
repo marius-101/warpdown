@@ -42,7 +42,8 @@ def test_fetch_plain_hls_and_thumbnails(tmp_path):
     video.parent.mkdir()
     p = fetch_subtitle(f"{base}/a.vtt", {}, video, "eng")
     assert p.name == "Movie.eng.vtt" and "Hello" in p.read_text()
-    p2 = fetch_subtitle(f"{base}/a.vtt", {}, video, "eng")          # same language twice -> no overwrite
+    (site / "b.vtt").write_text("WEBVTT\n\n00:00:09.000 --> 00:00:10.000\nDifferent track, same language\n")
+    p2 = fetch_subtitle(f"{base}/b.vtt", {}, video, "eng")          # different content, same language -> eng2
     assert p2.name == "Movie.eng2.vtt"
     assert fetch_subtitle(f"{base}/thumbs.vtt", {}, video, "x") is None
     p3 = fetch_subtitle(f"{base}/sub.m3u8", {}, video, "jpn")
@@ -80,3 +81,25 @@ def test_manager_saves_subtitles_next_to_video(qapp, tmp_path, monkeypatch):
     m.shutdown()
     ssrv.shutdown()
     vsrv.shutdown()
+
+
+def test_language_filter_and_dedupe(tmp_path):
+    from kudm.subtitles import matches_langs, parse_langs, peek_subtitle
+    assert parse_langs("eng, en ,") == ["eng", "en"]
+    assert matches_langs("eng", ["eng", "en"]) and matches_langs("en-US", ["en"]) and matches_langs("English", ["eng"])
+    assert not matches_langs("ara", ["eng", "en"]) and not matches_langs("chi", ["eng", "en"])
+    assert matches_langs("ara", [])                      # empty filter = everything
+
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "eng.vtt").write_text(VTT)
+    (site / "thumbs.vtt").write_text("WEBVTT\n\n00:00:00.000 --> 00:00:05.000\nsprite.jpg#xywh=0,0,160,90\n")
+    srv, base = serve_dir(site)
+    info = peek_subtitle(f"{base}/eng.vtt", {})
+    assert info["cues"] == 1 and info["ext"] == ".vtt"
+    assert peek_subtitle(f"{base}/thumbs.vtt", {}) is None
+    video = tmp_path / "V.mp4"
+    a = fetch_subtitle(f"{base}/eng.vtt", {}, video, "eng")
+    b = fetch_subtitle(f"{base}/eng.vtt", {}, video, "eng")      # identical content -> reuse, no eng2
+    assert a == b and len(list(tmp_path.glob("V.*.vtt"))) == 1
+    srv.shutdown()

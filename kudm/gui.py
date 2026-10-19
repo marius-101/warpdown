@@ -9,13 +9,14 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, 
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QPainter, QPalette
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget,
+    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
 from . import __version__
 from .engine import probe
+from .subtitles import matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
 from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed
 
@@ -135,6 +136,7 @@ class ProgressDelegate(QStyledItemDelegate):
 
 class AddDialog(QDialog):
     probed = Signal(object, str)
+    sub_info = Signal(int, object)
 
     def __init__(self, parent, url: str = ""):
         super().__init__(parent)
@@ -167,14 +169,67 @@ class AddDialog(QDialog):
         form.addRow("Connections:", self.conns)
         form.addRow("", self.sort)
         form.addRow("", self.start_now)
+        self.subs_label = QLabel("Subtitles found on the page (checked ones are saved next to the video):")
+        self.subs_list = QListWidget()
+        self.subs_list.setMaximumHeight(130)
+        self.subs_label.hide(); self.subs_list.hide()
+        form.addRow(self.subs_label)
+        form.addRow(self.subs_list)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         form.addRow(bb)
         self.probed.connect(self._on_probed)
+        self.sub_info.connect(self._on_sub_info)
         self.url.editingFinished.connect(self._probe)
         if url:
             self._probe()
+
+    def set_subs(self, subs: list, headers: dict) -> None:
+        """Show a checklist of subtitle tracks; peek at each in the background (size, cue count)."""
+        if not subs:
+            return
+        wanted = parse_langs(str(QSettings().value("sub_langs", "eng,en")))
+        tags = [tag_for(t.get("lang", ""), t.get("label", ""), t["url"]) for t in subs]
+        pre = [matches_langs(tag, wanted) for tag in tags]
+        if not any(pre):
+            pre = [True] * len(subs)           # nothing matches the language filter: don't hide everything
+        self.subs_label.show(); self.subs_list.show()
+        hdrs = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
+                for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
+        for i, (t, tag) in enumerate(zip(subs, tags)):
+            tail = "/".join(t["url"].split("?")[0].split("/")[-2:])
+            it = QListWidgetItem(f"{tag}  ·  {tail}  ·  checking…")
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(Qt.Checked if pre[i] else Qt.Unchecked)
+            it.setData(Qt.UserRole, t)
+            it.setToolTip(t["url"])
+            self.subs_list.addItem(it)
+
+            def work(i=i, url=t["url"]):
+                try:
+                    self.sub_info.emit(i, peek_subtitle(url, hdrs))
+                except Exception as e:  # noqa: BLE001
+                    self.sub_info.emit(i, {"error": str(e) or e.__class__.__name__})
+            threading.Thread(target=work, daemon=True).start()
+
+    def _on_sub_info(self, i: int, info) -> None:
+        it = self.subs_list.item(i)
+        base = it.text().rsplit("  ·  checking…", 1)[0]
+        if info is None or "error" in (info or {}):
+            it.setText(f"{base}  ·  not a subtitle file")
+            it.setCheckState(Qt.Unchecked)
+            it.setFlags(it.flags() & ~Qt.ItemIsUserCheckable)
+        else:
+            it.setText(f"{base}  ·  {info['cues']} cues, {fmt_size(info['bytes'])}")
+
+    def selected_subs(self) -> list:
+        out = []
+        for i in range(self.subs_list.count()):
+            it = self.subs_list.item(i)
+            if it.checkState() == Qt.Checked:
+                out.append(it.data(Qt.UserRole))
+        return out
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Save to", self.dir.text())
@@ -214,6 +269,8 @@ class SettingsDialog(QDialog):
         self.conns.setValue(int(s.value("connections", 8)))
         self.sort = QCheckBox("Sort downloads into category folders")
         self.sort.setChecked(str(s.value("sort_by_category", "true")).lower() == "true")
+        self.sublangs = QLineEdit(str(s.value("sub_langs", "eng,en")))
+        self.sublangs.setPlaceholderText("e.g. eng,en  (empty = every language)")
         self.active = QSpinBox(); self.active.setRange(1, 20)
         self.active.setValue(mgr.max_active)
         self.limit = QSpinBox(); self.limit.setRange(0, 1_000_000); self.limit.setSuffix(" KB/s")
@@ -225,6 +282,7 @@ class SettingsDialog(QDialog):
         form.addRow("Connections per download:", self.conns)
         form.addRow("Simultaneous downloads:", self.active)
         form.addRow("Speed limit:", self.limit)
+        form.addRow("Subtitle languages:", self.sublangs)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
         form.addRow(bb)
@@ -332,8 +390,7 @@ class MainWindow(QMainWindow):
             clip = QGuiApplication.clipboard().text().strip()
             url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
         d = AddDialog(self, url)
-        if subs:
-            d.info.setText(f"{len(subs)} subtitle file(s) will be saved next to the video")
+        d.set_subs(subs or [], headers or {})
         if filename:
             d.name.setText(filename)
         if d.exec() == QDialog.Accepted and d.url.text().strip():
@@ -341,7 +398,7 @@ class MainWindow(QMainWindow):
             s.setValue("download_dir", d.dir.text())
             s.setValue("connections", d.conns.value())
             self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
-                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=subs)
+                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs())
 
     def delete_selected(self):
         ids = self._selected_ids()
@@ -365,6 +422,7 @@ class MainWindow(QMainWindow):
             s.setValue("speed_limit_kb", d.limit.value())
             s.setValue("max_active", d.active.value())
             s.setValue("sort_by_category", d.sort.isChecked())
+            s.setValue("sub_langs", d.sublangs.text().strip())
             apply_settings(self.mgr)
 
     def _open_file(self, idx):
@@ -406,6 +464,7 @@ def apply_settings(mgr: DownloadManager) -> None:
     mgr.default_connections = int(s.value("connections", 8))
     mgr.max_active = int(s.value("max_active", 3))
     mgr.sort_by_category = str(s.value("sort_by_category", "true")).lower() == "true"
+    mgr.sub_langs = parse_langs(str(s.value("sub_langs", "eng,en")))
     if mgr.sort_by_category:
         try:
             ensure_category_dirs(Path(s.value("download_dir", str(default_download_dir()))))

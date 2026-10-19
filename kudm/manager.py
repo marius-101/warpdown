@@ -13,7 +13,7 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .hls import HlsDownloader
-from .subtitles import fetch_subtitle
+from .subtitles import fetch_subtitle, matches_langs, tag_for
 from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
@@ -66,6 +66,7 @@ class DownloadManager(QObject):
         self.max_active = 3
         self.default_connections = 8
         self.sort_by_category = True
+        self.sub_langs: list[str] = []   # wanted subtitle languages for auto-found tracks; [] = all
         self._file = data_dir() / "downloads.json"
         self._finished.connect(self._on_finished)
         self._probed.connect(self._on_probed)
@@ -247,7 +248,8 @@ class DownloadManager(QObject):
 
     def _start_subtitles(self, it: Item, found: list) -> None:
         tracks, seen = [], set()
-        for t in [*it.subs, *found]:
+        found = [t for t in found if matches_langs(tag_for(t.get("lang", ""), t.get("label", ""), t["url"]), self.sub_langs)]
+        for t in [*it.subs, *found]:    # it.subs were picked by the user in the dialog; `found` are auto-detected
             if t.get("url") and t["url"] not in seen:
                 seen.add(t["url"])
                 tracks.append(t)
