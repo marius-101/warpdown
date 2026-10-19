@@ -79,7 +79,7 @@ def update() -> tuple[bool, str]:
     return r.returncode == 0, out[-1] if out else ""
 
 
-def _common_args(headers: dict) -> list[str]:
+def _common_args(headers: dict, url: str = "") -> list[str]:
     args = ["--no-playlist", "--no-warnings", "--ignore-config"]
     rt = js_runtime()
     if rt:
@@ -88,14 +88,16 @@ def _common_args(headers: dict) -> list[str]:
         args += ["--referer", headers["Referer"]]
     if headers.get("User-Agent"):
         args += ["--user-agent", headers["User-Agent"]]
-    if headers.get("Cookie"):
+    # Never forward browser cookies to YouTube: they don't match yt-dlp's own session and make YouTube answer
+    # "The page needs to be reloaded" (and they're your login, which yt-dlp doesn't need for public videos).
+    if headers.get("Cookie") and not is_youtube(url):
         args += ["--add-header", f"Cookie:{headers['Cookie']}"]
     return args
 
 
 def fetch_info(url: str, headers: dict | None = None, timeout: float = 90) -> dict:
     """Title, duration, max height and subtitle tracks for the dialog. Raises RuntimeError with yt-dlp's message."""
-    r = subprocess.run([*CMD, *_common_args(headers or {}), "--dump-single-json", "--skip-download", url],
+    r = subprocess.run([*CMD, *_common_args(headers or {}, url), "--dump-single-json", "--skip-download", url],
                        capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         msg = [l for l in r.stderr.splitlines() if l.strip()]
@@ -181,7 +183,7 @@ class YtdlpDownloader:
     def _args(self) -> list[str]:
         job, o = self.job, self.job.opts
         stem = job.dest.with_suffix("")
-        args = [*CMD, *_common_args(job.headers), "--newline", "--progress", "--no-simulate", "--continue",
+        args = [*CMD, *_common_args(job.headers, job.url), "--newline", "--progress", "--no-simulate", "--continue",
                 "--progress-template",
                 "download:KUDMP|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|"
                 "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.filename)s",

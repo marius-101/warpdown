@@ -71,3 +71,11 @@ def test_manager_ytdlp_item_sorted_into_video_folder(qapp, site, tmp_path, monke
     assert it.status == COMPLETED, (it.status, it.error)
     assert (tmp_path / "dl" / "Video" / "Great Video.mp4").exists() and it.category == "Video"
     m.shutdown()
+
+
+def test_cookies_are_not_sent_to_youtube():
+    h = {"Cookie": "SID=secret", "Referer": "https://x/", "User-Agent": "UA"}
+    yt = ytdlp._common_args(h, "https://www.youtube.com/watch?v=abc")
+    assert "Cookie:SID=secret" not in " ".join(yt) and "--referer" in yt and "--user-agent" in yt
+    other = ytdlp._common_args(h, "https://vimeo.com/123")
+    assert "Cookie:SID=secret" in other                       # other sites may need the login
