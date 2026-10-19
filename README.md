@@ -7,9 +7,11 @@ An open-source, IDM-style download manager for Linux (built and tested on Kubunt
   takes over half of the slowest remaining segment, as IDM does
 - Pause / resume, also across restarts (servers that support HTTP Range)
 - Queue with a configurable number of simultaneous downloads, global speed limit
-- Categories (Video, Music, Compressed, Documents, Programs), tray icon, completion notifications
+- IDM-style category folders (Video, Music, Compressed, Documents, Programs, Other) created automatically and
+  files sorted into them; tray icon, completion notifications
 - Browser integration (Firefox + Chromium family): captures downloads, "Download with KUDM" context menu,
-  and a popup listing detected video/audio streams on the current page
+  a floating **Download this video** button over page videos, and a popup listing detected video/audio streams
+  (direct file streams only; HLS/DASH/blob streams are on the roadmap)
 - Pure Python + Qt (PySide6); no aria2 or other system packages required
 
 ## Run

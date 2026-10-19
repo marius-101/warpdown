@@ -104,10 +104,10 @@ def category_for(name: str) -> str:
     for cat, exts in CATEGORIES.items():
         if ext in exts:
             return cat
-    return "General"
+    return "Other"
 
 
 def ensure_category_dirs(base: Path) -> None:
     """Create the IDM-style category folders (Video, Music, ...) inside `base`."""
-    for cat in CATEGORIES:
+    for cat in (*CATEGORIES, "Other"):
         (Path(base) / cat).mkdir(parents=True, exist_ok=True)

@@ -30,7 +30,7 @@ class Item:
     downloaded: int = 0
     speed: float = 0.0
     error: str = ""
-    category: str = "General"
+    category: str = "Other"
     added: float = field(default_factory=time.time)
     connections: int = 8
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
@@ -73,6 +73,8 @@ class DownloadManager(QObject):
         try:
             for d in json.loads(self._file.read_text()):
                 it = Item(**d)
+                if it.category == "General":   # renamed in 0.2
+                    it.category = "Other"
                 if it.status in (DOWNLOADING, PROBING, QUEUED):
                     it.status = PAUSED
                 it.speed = 0.0
@@ -187,7 +189,7 @@ class DownloadManager(QObject):
         it.url, it.size, it.resumable = res.url, res.size, res.resumable
         name = it.filename or res.filename
         it.category = category_for(name)
-        if it.sort and it.category != "General":
+        if it.sort:
             it.directory = str(Path(it.directory) / it.category)   # IDM-style folder per file type
         try:
             Path(it.directory).mkdir(parents=True, exist_ok=True)

@@ -23,3 +23,10 @@ document.getElementById("t").onclick = () => {
   const out = document.getElementById("tr"); out.textContent = "…";
   api.runtime.sendMessage({ type: "ping" }).then(r => (out.textContent = r.ok ? "OK: host reachable" : "FAILED: " + r.error));
 };
+
+api.permissions.contains({ origins: ["<all_urls>"] }).then(ok => {
+  if (ok) return;
+  document.getElementById("perm").hidden = false;
+  document.getElementById("grant").onclick = () =>
+    api.permissions.request({ origins: ["<all_urls>"] }).then(g => { if (g) location.reload(); });
+}).catch(() => {});

@@ -19,6 +19,16 @@ async function sendToKudm(url, extra = {}) {
   });
 }
 
+const EXT = { "video/mp4": ".mp4", "video/webm": ".webm", "video/x-matroska": ".mkv", "video/quicktime": ".mov",
+  "audio/mpeg": ".mp3", "audio/mp4": ".m4a", "audio/webm": ".webm", "audio/ogg": ".ogg", "audio/aac": ".aac" };
+function nameFor(title, m) {
+  let ext = (m.url.split("?")[0].match(/\.(mp4|webm|mkv|mov|flv|mp3|m4a|ogg|aac)$/i) || [])[0] || EXT[(m.type || "").split(";")[0]] || "";
+  const base = (title || "video").replace(/[\\/:*?"<>|\x00-\x1f]/g, "_").trim().slice(0, 120) || "video";
+  return base + ext;
+}
+// Chunked streaming URLs (YouTube-style &range=…) are fragments, not whole files.
+const isFragment = u => /[?&](range|bytes|sq|seg)=/i.test(u) || /\/videoplayback/.test(u);
+
 async function note(msg) {
   console.log("[KUDM]", msg);
   await api.storage.local.set({ lastEvent: `${new Date().toLocaleTimeString()} ${msg}` });
@@ -59,7 +69,7 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   const h = Object.fromEntries(d.responseHeaders.map(x => [x.name.toLowerCase(), x.value || ""]));
   const type = h["content-type"] || "";
   const isMedia = /^(video|audio)\//.test(type) || /\.(mp4|webm|mkv|mp3|m4a|flv)(\?|$)/i.test(d.url);
-  if (!isMedia || d.statusCode >= 400) return;
+  if (!isMedia || d.statusCode >= 400 || isFragment(d.url)) return;
   const size = parseInt((h["content-range"] || "").split("/")[1] || h["content-length"] || "0", 10);
   if (size && size < 200 * 1024) return; // ignore tiny segments
   const list = (media[d.tabId] = media[d.tabId] || []);
@@ -68,13 +78,35 @@ api.webRequest.onHeadersReceived.addListener((d) => {
 api.tabs.onRemoved.addListener(id => delete media[id]);
 api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) delete media[id]; });
 
-api.runtime.onMessage.addListener((msg, _s, reply) => {
+api.runtime.onMessage.addListener((msg, sender, reply) => {
   if (msg.type === "ping") {
     api.runtime.sendNativeMessage(HOST, { action: "ping" }).then(
       r => reply({ ok: true, r }), e => reply({ ok: false, error: String(e && e.message || e) }));
     return true;
   }
+  if (msg.type === "grab") {
+    const tabId = sender.tab && sender.tab.id;
+    const seen = new Set(), list = [];
+    const add = (url, type, size) => { if (!seen.has(url) && !isFragment(url)) { seen.add(url); list.push({ url, type: type || "", size: size || 0 }); } };
+    for (const u of msg.candidates || []) add(u);
+    for (const m of media[tabId] || []) add(m.url, m.type, m.size);
+    if (!list.length) {
+      reply({ error: "No downloadable file found. This site streams in pieces (HLS/DASH/blob), which KUDM can't grab yet." });
+      return true;
+    }
+    const nf = m => nameFor(msg.title, m);
+    if (list.length === 1) {
+      sendToKudm(list[0].url, { referrer: msg.page, filename: nf(list[0]) }).then(
+        r => reply(r && r.ok ? { sent: true } : { error: "KUDM not reachable" }),
+        e => reply({ error: String(e && e.message || e) }));
+    } else {
+      list.sort((a, b) => b.size - a.size);
+      // functions can't cross the message boundary: send precomputed names instead
+      reply({ list: list.map(m => ({ ...m, name: nf(m) })), nameFor: null });
+    }
+    return true;
+  }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);
-  if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer }).then(reply);
+  if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer, filename: msg.filename }).then(reply);
   return true;
 });

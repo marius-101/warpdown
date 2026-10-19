@@ -21,7 +21,7 @@ from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size,
 
 COLUMNS = ["Name", "Size", "Progress", "Speed", "ETA", "Status", "Added"]
 CATS = ["All Downloads", "Unfinished", "Finished", "Video", "Music", "Compressed",
-        "Documents", "Programs", "General"]
+        "Documents", "Programs", "Other"]
 
 
 class Model(QAbstractTableModel):
