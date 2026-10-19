@@ -103,3 +103,35 @@ def test_language_filter_and_dedupe(tmp_path):
     b = fetch_subtitle(f"{base}/eng.vtt", {}, video, "eng")      # identical content -> reuse, no eng2
     assert a == b and len(list(tmp_path.glob("V.*.vtt"))) == 1
     srv.shutdown()
+
+
+def test_labels_tags_and_default_selection():
+    from kudm.subtitles import default_checked, tag_for, track_kind
+    assert track_kind("English (SDH)") == "sdh" and track_kind("Signs & Songs") == "signs" and track_kind("English") == ""
+    assert tag_for("eng", "English (SDH)", "http://x/a.vtt") == "eng.sdh"
+    assert tag_for("eng", "English", "http://x/a.vtt") == "eng"
+    tracks = [
+        {"url": "http://x/sdh.vtt", "lang": "eng", "label": "English (SDH)"},
+        {"url": "http://x/ara.vtt", "lang": "ara", "label": "Arabic"},
+        {"url": "http://x/signs.vtt", "lang": "eng", "label": "English Signs"},
+        {"url": "http://x/full.vtt", "lang": "eng", "label": "English"},
+        {"url": "http://x/full2.vtt", "lang": "eng", "label": "English"},
+    ]
+    # wanted English: exactly one tick, the first *plain* English track (not SDH, not signs)
+    assert default_checked(tracks, ["eng", "en"]) == [False, False, False, True, False]
+    assert default_checked(tracks[:3], ["eng"]) == [True, False, False]       # only flagged ones exist -> first flagged
+    assert default_checked(tracks, ["ger"]) == [False, True, False, True, False]  # no match -> one plain track per language
+    assert default_checked(tracks, []) == [False, True, False, True, False]   # empty filter = every language, one each
+
+
+def test_probe_reports_hls_subtitle_tracks(tmp_path):
+    site = tmp_path / "site"
+    site.mkdir()
+    (site / "m.m3u8").write_text(
+        '#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English (SDH)",LANGUAGE="eng",URI="s1.m3u8"\n'
+        '#EXT-X-STREAM-INF:BANDWIDTH=1000,SUBTITLES="s"\nv.m3u8\n')
+    srv, base = serve_dir(site)
+    from kudm.engine import probe
+    p = probe(f"{base}/m.m3u8")
+    assert p.hls and p.sub_tracks == [{"url": f"{base}/s1.m3u8", "lang": "eng", "label": "English (SDH)"}]
+    srv.shutdown()

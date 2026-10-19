@@ -16,7 +16,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from .engine import probe
-from .subtitles import matches_langs, parse_langs, peek_subtitle, tag_for
+from .subtitles import default_checked, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
 from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed
 
@@ -172,6 +172,12 @@ class AddDialog(QDialog):
         self.subs_label = QLabel("Subtitles found on the page (checked ones are saved next to the video):")
         self.subs_list = QListWidget()
         self.subs_list.setMaximumHeight(130)
+        self._sub_tracks: list = []
+        self._sub_headers: dict = {}
+        self._sub_touched = False
+        self._sub_invalid: set = set()
+        self._sub_loading = False
+        self.subs_list.itemChanged.connect(self._on_sub_changed)
         self.subs_label.hide(); self.subs_list.hide()
         form.addRow(self.subs_label)
         form.addRow(self.subs_list)
@@ -186,50 +192,72 @@ class AddDialog(QDialog):
             self._probe()
 
     def set_subs(self, subs: list, headers: dict) -> None:
-        """Show a checklist of subtitle tracks; peek at each in the background (size, cue count)."""
-        if not subs:
+        """Checklist of subtitle tracks (page tracks now, HLS tracks once the stream is probed)."""
+        self._sub_headers = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
+                             for k, v in (headers or {}).items()
+                             if k in ("referer", "cookie", "user_agent") and v}
+        self.add_subs(subs)
+
+    def add_subs(self, new: list) -> None:
+        have = {t["url"] for t in self._sub_tracks}
+        new = [t for t in new if t["url"] not in have]
+        if not new:
             return
-        wanted = parse_langs(str(QSettings().value("sub_langs", "eng,en")))
-        tags = [tag_for(t.get("lang", ""), t.get("label", ""), t["url"]) for t in subs]
-        pre = [matches_langs(tag, wanted) for tag in tags]
-        if not any(pre):
-            pre = [True] * len(subs)           # nothing matches the language filter: don't hide everything
         self.subs_label.show(); self.subs_list.show()
-        hdrs = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
-                for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
-        for i, (t, tag) in enumerate(zip(subs, tags)):
-            tail = "/".join(t["url"].split("?")[0].split("/")[-2:])
+        for t in new:
+            i = len(self._sub_tracks)
+            tag = tag_for(t.get("lang", ""), t.get("label", ""), t["url"])
+            tail = t.get("label") or "/".join(t["url"].split("?")[0].split("/")[-2:])
             it = QListWidgetItem(f"{tag}  ·  {tail}  ·  checking…")
             it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked if pre[i] else Qt.Unchecked)
-            it.setData(Qt.UserRole, t)
+            it.setCheckState(Qt.Unchecked)
             it.setToolTip(t["url"])
+            self._sub_loading = True
             self.subs_list.addItem(it)
+            self._sub_loading = False
+            self._sub_tracks.append(t)
 
             def work(i=i, url=t["url"]):
                 try:
-                    self.sub_info.emit(i, peek_subtitle(url, hdrs))
+                    self.sub_info.emit(i, peek_subtitle(url, self._sub_headers))
                 except Exception as e:  # noqa: BLE001
                     self.sub_info.emit(i, {"error": str(e) or e.__class__.__name__})
             threading.Thread(target=work, daemon=True).start()
+        self._apply_default_checks()
+
+    def _apply_default_checks(self) -> None:
+        """One tick per language (plain dialogue preferred), recomputed until the user touches a checkbox."""
+        if self._sub_touched:
+            return
+        wanted = parse_langs(str(QSettings().value("sub_langs", "eng,en")))
+        valid = [i for i in range(len(self._sub_tracks)) if i not in self._sub_invalid]
+        pre = default_checked([self._sub_tracks[i] for i in valid], wanted)
+        ticked = {i for i, c in zip(valid, pre) if c}
+        self._sub_loading = True
+        for i in range(len(self._sub_tracks)):
+            self.subs_list.item(i).setCheckState(Qt.Checked if i in ticked else Qt.Unchecked)
+        self._sub_loading = False
+
+    def _on_sub_changed(self, _item) -> None:
+        if not self._sub_loading:
+            self._sub_touched = True
 
     def _on_sub_info(self, i: int, info) -> None:
         it = self.subs_list.item(i)
+        if it is None:
+            return
         base = it.text().rsplit("  ·  checking…", 1)[0]
-        if info is None or "error" in (info or {}):
+        if info is None or "error" in info:
             it.setText(f"{base}  ·  not a subtitle file")
-            it.setCheckState(Qt.Unchecked)
             it.setFlags(it.flags() & ~Qt.ItemIsUserCheckable)
+            self._sub_invalid.add(i)
+            self._apply_default_checks()
         else:
             it.setText(f"{base}  ·  {info['cues']} cues, {fmt_size(info['bytes'])}")
 
     def selected_subs(self) -> list:
-        out = []
-        for i in range(self.subs_list.count()):
-            it = self.subs_list.item(i)
-            if it.checkState() == Qt.Checked:
-                out.append(it.data(Qt.UserRole))
-        return out
+        return [self._sub_tracks[i] for i in range(self.subs_list.count())
+                if self.subs_list.item(i).checkState() == Qt.Checked]
 
     def _browse(self):
         d = QFileDialog.getExistingDirectory(self, "Save to", self.dir.text())
@@ -253,6 +281,8 @@ class AddDialog(QDialog):
         if res is None:
             self.info.setText(f"Could not check: {err}")
             return
+        if getattr(res, "sub_tracks", None):
+            self.add_subs(res.sub_tracks)
         size = fmt_size(res.size) if res.size > 0 else "unknown size"
         self.info.setText(f"{res.filename} — {size} — {'resumable' if res.resumable else 'not resumable'}")
         if not self.name.text():
@@ -398,7 +428,8 @@ class MainWindow(QMainWindow):
             s.setValue("download_dir", d.dir.text())
             s.setValue("connections", d.conns.value())
             self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
-                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs())
+                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs(),
+                         auto_subs=False)
 
     def delete_selected(self):
         ids = self._selected_ids()

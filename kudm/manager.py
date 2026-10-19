@@ -36,6 +36,7 @@ class Item:
     added: float = field(default_factory=time.time)
     connections: int = 8
     subs: list = field(default_factory=list)       # [{url, lang, label}] sent by the browser
+    auto_subs: bool = True    # also save subtitle tracks found in the HLS playlist (False = user chose in the dialog)
     sub_files: list = field(default_factory=list)  # subtitle files saved next to the video
     kind: str = "http"   # or "hls"
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
@@ -98,10 +99,10 @@ class DownloadManager(QObject):
     # ---- API --------------------------------------------------------
     def add(self, url: str, directory: str, filename: str = "", headers: dict | None = None,
             connections: int | None = None, start: bool = True, sort: bool | None = None,
-            subs: list | None = None) -> Item:
+            subs: list | None = None, auto_subs: bool = True) -> Item:
         it = Item(url=url, directory=directory, filename=filename, headers=headers or {},
                   connections=connections or self.default_connections,
-                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []),
+                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []), auto_subs=auto_subs,
                   status=QUEUED if start else PAUSED)
         self.items[it.id] = it
         self.added.emit(it.id)
@@ -248,7 +249,7 @@ class DownloadManager(QObject):
 
     def _start_subtitles(self, it: Item, found: list) -> None:
         tracks, seen = [], set()
-        found = [t for t in found if matches_langs(tag_for(t.get("lang", ""), t.get("label", ""), t["url"]), self.sub_langs)]
+        found = [] if not it.auto_subs else [t for t in found if matches_langs(tag_for(t.get("lang", ""), t.get("label", ""), t["url"]), self.sub_langs)]
         for t in [*it.subs, *found]:    # it.subs were picked by the user in the dialog; `found` are auto-detected
             if t.get("url") and t["url"] not in seen:
                 seen.add(t["url"])

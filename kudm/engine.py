@@ -40,6 +40,7 @@ class ProbeResult:
     content_type: str = ""
     hls: bool = False
     head: bytes = b""  # first bytes of the file, for type sniffing
+    sub_tracks: list = field(default_factory=list)  # HLS subtitle renditions [{url, lang, label}]
 
 
 def is_hls(url: str, content_type: str = "") -> bool:
@@ -63,7 +64,13 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             if is_hls(str(r.url), ctype) or head.lstrip(b"\xef\xbb\xbf").startswith(b"#EXTM3U"):
                 base = os.path.splitext(fname)[0]
                 name = "video" if base.lower() in ("index", "master", "playlist", "chunklist", "") else base
-                return ProbeResult(str(r.url), -1, False, name + ".mp4", ctype, hls=True)
+                tracks: list = []
+                try:
+                    from .hls import parse_subtitle_tracks   # lazy: hls imports this module
+                    tracks = parse_subtitle_tracks(c.get(str(r.url)).text, str(r.url))
+                except Exception:  # noqa: BLE001  (subtitles are optional)
+                    pass
+                return ProbeResult(str(r.url), -1, False, name + ".mp4", ctype, hls=True, sub_tracks=tracks)
             if r.status_code == 206:
                 cr = r.headers.get("content-range", "")
                 size = int(cr.rsplit("/", 1)[-1]) if cr.rsplit("/", 1)[-1].isdigit() else -1

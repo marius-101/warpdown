@@ -44,9 +44,36 @@ def _segments(playlist: str, base: str) -> list[str]:
     return [urljoin(base, l.strip()) for l in playlist.splitlines() if l.strip() and not l.startswith("#")]
 
 
+_KIND = re.compile(r"\b(sdh|cc|hi|captions?|signs?|songs?|forced|commentary)\b", re.I)
+
+
+def track_kind(label: str) -> str:
+    """'sdh' / 'signs' / 'forced' ... if the track's label says it isn't the plain full dialogue, else ''."""
+    m = _KIND.search(label or "")
+    return m.group(1).lower() if m else ""
+
+
 def tag_for(lang: str, label: str, url: str) -> str:
     raw = lang or label or Path(unquote(urlsplit(url).path)).stem
-    return sanitize_filename(raw).replace(" ", "_")[:24].strip("._") or "sub"
+    tag = sanitize_filename(raw).replace(" ", "_")[:24].strip("._") or "sub"
+    kind = track_kind(label)
+    return f"{tag}.{kind}" if kind and kind not in tag.lower() else tag
+
+
+def default_checked(tracks: list[dict], wanted: list[str]) -> list[bool]:
+    """Pre-tick one track per language: in a wanted language, preferring plain dialogue over SDH/signs/forced."""
+    tags = [tag_for(t.get("lang", ""), t.get("label", ""), t["url"]).split(".")[0] for t in tracks]
+    ok = [matches_langs(g, wanted) for g in tags]
+    if not any(ok):
+        ok = [True] * len(tracks)              # nothing matches the language filter: don't hide everything
+    checked = [False] * len(tracks)
+    done: set[str] = set()
+    for pass_plain in (True, False):           # first plain tracks, then (if a language had none) flagged ones
+        for i, t in enumerate(tracks):
+            if ok[i] and tags[i] not in done and (not pass_plain or not track_kind(t.get("label", ""))):
+                checked[i] = True
+                done.add(tags[i])
+    return checked
 
 
 def _fetch_text(url: str, headers: dict) -> str:
