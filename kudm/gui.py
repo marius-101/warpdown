@@ -3,12 +3,13 @@
 from __future__ import annotations
 
 import threading
+import time
 from pathlib import Path
 
 from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, Qt, QUrl, Signal
 from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QPainter, QPalette
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
+    QAbstractItemView, QApplication, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
@@ -19,6 +20,8 @@ from .engine import probe
 from .subtitles import default_checked, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
 from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed
+
+_PEEK_SLOTS = threading.Semaphore(3)
 
 COLUMNS = ["Name", "Size", "Progress", "Speed", "ETA", "Status", "Added"]
 CATS = ["All Downloads", "Unfinished", "Finished", "Video", "Music", "Compressed",
@@ -161,7 +164,9 @@ class AddDialog(QDialog):
         self.sort.setChecked(str(settings.value("sort_by_category", "true")).lower() == "true")
         self.start_now = QCheckBox("Start immediately")
         self.start_now.setChecked(True)
-        form = QFormLayout(self)
+        outer = QVBoxLayout(self)
+        form = QFormLayout()
+        form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
         form.addRow("URL:", self.url)
         form.addRow("", self.info)
         form.addRow("Save as:", self.name)
@@ -171,7 +176,7 @@ class AddDialog(QDialog):
         form.addRow("", self.start_now)
         self.subs_label = QLabel("Subtitles found on the page (checked ones are saved next to the video):")
         self.subs_list = QListWidget()
-        self.subs_list.setMaximumHeight(130)
+        self.subs_list.setMinimumHeight(90)
         self._sub_tracks: list = []
         self._sub_headers: dict = {}
         self._sub_touched = False
@@ -179,12 +184,14 @@ class AddDialog(QDialog):
         self._sub_loading = False
         self.subs_list.itemChanged.connect(self._on_sub_changed)
         self.subs_label.hide(); self.subs_list.hide()
-        form.addRow(self.subs_label)
-        form.addRow(self.subs_list)
+        outer.addLayout(form)
+        outer.addWidget(self.subs_label)
+        outer.addWidget(self.subs_list, 3)       # extra height goes here, not into gaps between the form rows
+        outer.addStretch(1)                      # ...or below the form when there is no subtitle list
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
-        form.addRow(bb)
+        outer.addWidget(bb)
         self.probed.connect(self._on_probed)
         self.sub_info.connect(self._on_sub_info)
         self.url.editingFinished.connect(self._probe)
@@ -218,10 +225,16 @@ class AddDialog(QDialog):
             self._sub_tracks.append(t)
 
             def work(i=i, url=t["url"]):
-                try:
-                    self.sub_info.emit(i, peek_subtitle(url, self._sub_headers))
-                except Exception as e:  # noqa: BLE001
-                    self.sub_info.emit(i, {"error": str(e) or e.__class__.__name__})
+                with _PEEK_SLOTS:                      # a few at a time: servers may throttle bursts
+                    for attempt in (1, 2):
+                        try:
+                            self.sub_info.emit(i, peek_subtitle(url, self._sub_headers))
+                            return
+                        except Exception as e:  # noqa: BLE001
+                            if attempt == 2:
+                                self.sub_info.emit(i, {"error": str(e) or e.__class__.__name__})
+                            else:
+                                time.sleep(1)
             threading.Thread(target=work, daemon=True).start()
         self._apply_default_checks()
 
@@ -247,11 +260,13 @@ class AddDialog(QDialog):
         if it is None:
             return
         base = it.text().rsplit("  ·  checking…", 1)[0]
-        if info is None or "error" in info:
+        if info is None:                                  # fetched fine, but it isn't subtitle text
             it.setText(f"{base}  ·  not a subtitle file")
             it.setFlags(it.flags() & ~Qt.ItemIsUserCheckable)
             self._sub_invalid.add(i)
             self._apply_default_checks()
+        elif "error" in info:                             # couldn't fetch: say why, keep it selectable
+            it.setText(f"{base}  ·  couldn't check ({info['error'][:50]})")
         else:
             it.setText(f"{base}  ·  {info['cues']} cues, {fmt_size(info['bytes'])}")
 
@@ -284,7 +299,9 @@ class AddDialog(QDialog):
         if getattr(res, "sub_tracks", None):
             self.add_subs(res.sub_tracks)
         size = fmt_size(res.size) if res.size > 0 else "unknown size"
-        self.info.setText(f"{res.filename} — {size} — {'resumable' if res.resumable else 'not resumable'}")
+        shown = res.filename if len(res.filename) <= 70 else res.filename[:34] + "…" + res.filename[-34:]
+        self.info.setText(f"{shown} — {size} — {'resumable' if res.resumable else 'not resumable'}")
+        self.info.setToolTip(res.filename)
         if not self.name.text():
             self.name.setText(res.filename)
 

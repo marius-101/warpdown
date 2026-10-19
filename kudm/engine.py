@@ -63,7 +63,7 @@ def probe(url: str, headers: dict[str, str] | None = None, timeout: float = 20.0
             fname = filename_from_headers(cd, str(r.url))
             if is_hls(str(r.url), ctype) or head.lstrip(b"\xef\xbb\xbf").startswith(b"#EXTM3U"):
                 base = os.path.splitext(fname)[0]
-                name = "video" if base.lower() in ("index", "master", "playlist", "chunklist", "") else base
+                name = "video" if base.lower() in ("index", "master", "playlist", "chunklist", "") or len(base) > 40 else base
                 tracks: list = []
                 try:
                     from .hls import parse_subtitle_tracks   # lazy: hls imports this module
