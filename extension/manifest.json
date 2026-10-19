@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "KUDM Integration",
+  "version": "0.1.0",
+  "description": "Send downloads and detected videos to KUDM (KUbuntu Download Manager).",
+  "permissions": ["downloads", "nativeMessaging", "cookies", "webRequest", "contextMenus", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "scripts": ["background.js"] },
+  "action": { "default_title": "KUDM", "default_popup": "popup.html" },
+  "browser_specific_settings": { "gecko": { "id": "kudm@kudm.local", "strict_min_version": "121.0" } }
+}
