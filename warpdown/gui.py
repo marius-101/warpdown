@@ -18,7 +18,7 @@ from PySide6.QtWidgets import (
 )
 
 from . import __version__
-from . import browsers, ytdlp
+from . import browsers, themes, ytdlp
 from .engine import probe
 from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
@@ -52,6 +52,12 @@ def apply_font(size_pt: int) -> float:
 def font_scale() -> float:
     pt = QApplication.font().pointSizeF()
     return (pt if pt > 0 else base_font_pt()) / base_font_pt()
+
+
+def saved_theme() -> tuple[str, str]:
+    s = QSettings()
+    style, mode = str(s.value("ui_style", "default")), str(s.value("ui_mode", "auto"))
+    return (style if style in themes.STYLES else "default"), (mode if mode in themes.MODES else "auto")
 
 
 def saved_font_size() -> int:
@@ -150,7 +156,7 @@ class ProgressDelegate(QStyledItemDelegate):
         val = index.data(Qt.UserRole)
         if val is None:
             return super().paint(painter, option, index)
-        pal = option.palette
+        pal = QApplication.palette()      # the application's palette: the table's own copy is altered by stylesheets
         rect = QRectF(option.rect.adjusted(4, 5, -4, -5))
         fill = QRectF(rect.left(), rect.top(), rect.width() * max(0, min(val, 1000)) / 1000.0, rect.height())
         painter.save()
@@ -159,11 +165,12 @@ class ProgressDelegate(QStyledItemDelegate):
         painter.setPen(Qt.NoPen)
         groove = QColor(pal.color(QPalette.Mid)); groove.setAlpha(110)
         painter.setBrush(groove)
-        painter.drawRoundedRect(rect, 3, 3)
+        radius = themes.corner_radius()
+        painter.drawRoundedRect(rect, radius, radius)
         if fill.width() > 0:
             painter.setClipRect(fill)
             painter.setBrush(pal.color(QPalette.Highlight))
-            painter.drawRoundedRect(rect, 3, 3)
+            painter.drawRoundedRect(rect, radius, radius)
             painter.setClipping(False)
         text = index.data(Qt.DisplayRole) or ""
         painter.setClipRect(fill)
@@ -592,6 +599,7 @@ class ExtensionDialog(QDialog):
 class SettingsDialog(QDialog):
     yt_updated = Signal(bool, str)
     font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
+    theme_preview = Signal(str, str)  # (style, mode), likewise
 
     def __init__(self, parent, mgr: DownloadManager):
         super().__init__(parent)
@@ -616,7 +624,21 @@ class SettingsDialog(QDialog):
         idx = self.fontsize.findData(saved_font_size())
         self.fontsize.setCurrentIndex(idx if idx >= 0 else 0)
         self.fontsize.currentIndexChanged.connect(lambda _i: self.font_preview.emit(self.fontsize.currentData()))
+        self.style_box = QComboBox()
+        for key, label in themes.STYLES.items():
+            self.style_box.addItem(label, key)
+        self.mode_box = QComboBox()
+        for key, label in themes.MODES.items():
+            self.mode_box.addItem(label, key)
+        style, mode = saved_theme()
+        self.style_box.setCurrentIndex(self.style_box.findData(style))
+        self.mode_box.setCurrentIndex(self.mode_box.findData(mode))
+        for box in (self.style_box, self.mode_box):
+            box.currentIndexChanged.connect(
+                lambda _i: self.theme_preview.emit(self.style_box.currentData(), self.mode_box.currentData()))
         form = QFormLayout(self)
+        form.addRow("Style:", self.style_box)
+        form.addRow("Mode:", self.mode_box)
         form.addRow("Text size:", self.fontsize)
         form.addRow("Default folder:", self.dir)
         form.addRow("", self.sort)
@@ -726,6 +748,7 @@ class MainWindow(QMainWindow):
         for keys, delta in ((QKeySequence.ZoomIn, 1), (QKeySequence("Ctrl+="), 1), (QKeySequence.ZoomOut, -1)):
             QShortcut(keys, self, activated=lambda d=delta: self.zoom(d))
         QShortcut(QKeySequence("Ctrl+0"), self, activated=lambda: self.zoom(0))
+        self.refresh_icons()
         self.rescale()
 
         self.status = self.statusBar()
@@ -745,6 +768,32 @@ class MainWindow(QMainWindow):
         self.tray.show()
         mgr.changed.connect(self._notify_done)
         self._notified: set[str] = set()
+
+    # ---- themes & icons ----
+    _TOOLBAR_KEYS = {"Add URL": "add", "Resume": "resume", "Pause": "pause", "Delete": "delete",
+                     "Open Folder": "folder", "Browser": "browser", "Settings": "settings"}
+    _CATEGORY_KEYS = {"All Downloads": "all", "Unfinished": "unfinished", "Finished": "finished", "Video": "video",
+                      "Music": "music", "Compressed": "compressed", "Documents": "documents",
+                      "Programs": "programs", "Other": "other"}
+
+    def refresh_icons(self) -> None:
+        """Toolbar + category icons for the current style (the System default keeps the desktop's own icons)."""
+        if not hasattr(self, "_default_icons"):
+            self._default_icons = {a.text(): a.icon() for a in self.toolbar.actions() if a.text()}
+        style = themes.current_style()
+        color = QApplication.palette().color(QPalette.WindowText)
+        for a in self.toolbar.actions():
+            key = self._TOOLBAR_KEYS.get(a.text())
+            if key:
+                a.setIcon(themes.icon(key, style, color) or self._default_icons[a.text()])
+        for i in range(self.cats.count()):
+            it = self.cats.item(i)
+            it.setIcon(themes.icon(self._CATEGORY_KEYS.get(it.text(), "other"), style, color) or QIcon())
+
+    def set_theme(self, style: str, mode: str) -> None:
+        themes.apply_theme(style, mode)
+        self.refresh_icons()
+        self.rescale()
 
     # ---- folders & browser extension ----
     def download_root(self) -> Path:
@@ -788,6 +837,7 @@ class MainWindow(QMainWindow):
         self.toolbar.setIconSize(QSize(int(self._base_icon.width() * k), int(self._base_icon.height() * k)))
         cats_w = int(180 * min(k, 1.4))
         self.cats.setMaximumWidth(cats_w)
+        self.cats.setIconSize(QSize(int(18 * k), int(18 * k)))
         # grow the window (never shrink it) so the Name column keeps a usable width, up to the screen width
         needed = sum(int(w * k) for w in self._base_widths[1:]) + cats_w + int(260 * k) + 40
         scr = self.screen()
@@ -881,8 +931,10 @@ class MainWindow(QMainWindow):
 
     def settings_dialog(self):
         original_font = saved_font_size()
+        original_theme = saved_theme()
         d = SettingsDialog(self, self.mgr)
         d.font_preview.connect(self.set_font_size)
+        d.theme_preview.connect(self.set_theme)
         if d.exec() == QDialog.Accepted:
             s = QSettings()
             s.setValue("download_dir", d.dir.text())
@@ -892,10 +944,14 @@ class MainWindow(QMainWindow):
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
             s.setValue("font_size", int(d.fontsize.currentData()))
+            s.setValue("ui_style", d.style_box.currentData())
+            s.setValue("ui_mode", d.mode_box.currentData())
+            self.set_theme(d.style_box.currentData(), d.mode_box.currentData())
             self.set_font_size(int(d.fontsize.currentData()))
             apply_settings(self.mgr)
         else:
-            self.set_font_size(original_font)          # cancelled: undo the live preview
+            self.set_font_size(original_font)          # cancelled: undo the live previews
+            self.set_theme(*original_theme)
 
     def _open_file(self, idx):
         it = self.model.item(idx.row())

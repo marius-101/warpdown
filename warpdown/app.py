@@ -8,7 +8,8 @@ from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 
 from . import ipc
-from .gui import MainWindow, apply_font, apply_settings, saved_font_size
+from . import themes
+from .gui import MainWindow, apply_font, apply_settings, saved_font_size, saved_theme
 from .manager import DownloadManager
 from .util import default_download_dir, migrate_legacy_data
 
@@ -23,6 +24,7 @@ def main(argv: list[str] | None = None) -> int:
     app.setOrganizationName("warpdown")
     app.setQuitOnLastWindowClosed(False)
     apply_font(saved_font_size())          # text size chosen in Settings (0 = system default)
+    themes.apply_theme(*saved_theme())    # style + mode chosen in Settings
 
     # Already running? Hand the URLs over (or just raise the window) and exit.
     if ipc.send({"action": "add", "url": urls[0]} if urls else {"action": "show"}):

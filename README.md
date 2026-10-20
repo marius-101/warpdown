@@ -25,8 +25,13 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
   opens that folder
 - **Browser extension helper** — *Browser* in the toolbar (or Settings) guides you through adding the extension to
   Firefox or Chrome and registering the connector
+- **Themes** — pick a *Style* (System default, Kubuntu, Windows 11) and a *Mode* (Follow system, Light, Dark) in
+  Settings; each style has its own colours, shapes and icon set, with a live preview
 - **Adjustable text size** — *Settings → Text size* (live preview), or `Ctrl +` / `Ctrl -` / `Ctrl 0` in the main window
 - Tray icon, completion notifications, pure Python + Qt (PySide6) — no aria2 or other daemons needed
+
+### Themes
+![Warpdown themes: Kubuntu and Windows 11, light and dark](docs/themes.png)
 
 ## Install (Kubuntu / Ubuntu / Debian)
 ```bash
