@@ -2,6 +2,9 @@ const api = typeof browser !== "undefined" ? browser : chrome;
 const en = document.getElementById("en");
 api.storage.local.get("enabled").then(({ enabled = true }) => (en.checked = enabled));
 en.onchange = () => api.storage.local.set({ enabled: en.checked });
+const bs = document.getElementById("bs");
+api.storage.local.get("buttonStyle").then(({ buttonStyle = "full" }) => (bs.value = buttonStyle));
+bs.onchange = () => api.storage.local.set({ buttonStyle: bs.value });   // pages pick this up live, no reload
 api.tabs.query({ active: true, currentWindow: true }).then(([tab]) => {
   api.runtime.sendMessage({ type: "getMedia", tabId: tab.id }).then(list => {
     if (!list || !list.length) return;

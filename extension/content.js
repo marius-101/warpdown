@@ -12,6 +12,7 @@
       .btn{font:600 12px system-ui,sans-serif;color:#fff;background:#1d7fe0;border:0;border-radius:6px;
            padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px #0008;white-space:nowrap}
       .btn:hover{background:#3b97f5}
+      .btn.compact{padding:6px 9px;font-size:14px;line-height:1}
       .menu{margin-top:4px;background:#222;color:#eee;border-radius:6px;font:12px system-ui,sans-serif;
             box-shadow:0 2px 10px #000a;max-width:340px;overflow:hidden}
       .menu div{padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -21,7 +22,20 @@
     <button class="btn">⬇ Download this video</button><div class="menu" hidden></div>`;
   const btn = root.querySelector(".btn");
   const menu = root.querySelector(".menu");
-  let current = null, hideTimer = null, overHost = false;
+  let current = null, hideTimer = null, overHost = false, style = "full";
+
+  // Button style (set in the toolbar popup): "full" = arrow + text, "compact" = arrow only, "hidden" = no button.
+  function applyStyle(s) {
+    style = ["full", "compact", "hidden"].includes(s) ? s : "full";
+    btn.className = "btn" + (style === "compact" ? " compact" : "");
+    btn.textContent = style === "compact" ? "⬇" : "⬇ Download this video";
+    btn.title = "Download this video";
+    if (style === "hidden") hide(); else if (host.style.display === "block") place();
+  }
+  try {
+    api.storage.local.get("buttonStyle").then(({ buttonStyle }) => applyStyle(buttonStyle));
+    api.storage.onChanged.addListener(ch => { if (ch.buttonStyle) applyStyle(ch.buttonStyle.newValue); });
+  } catch (e) { /* storage unavailable: keep the full button */ }
 
   const sizeLabel = n => (n ? (n / 1048576).toFixed(1) + " MB · " : "");
   const attach = () => { if (!host.isConnected) (document.fullscreenElement || document.documentElement).appendChild(host); };
@@ -34,12 +48,21 @@
     return null;
   }
 
-  function show(v, r) {
+  // Top-right corner of the video; uses the real width so a wide menu under a compact button stays on screen.
+  function place() {
+    if (!current) return;
+    const r = current.getBoundingClientRect();
+    const w = host.offsetWidth || 190;
+    host.style.left = Math.max(0, Math.min(r.right - w - 8, innerWidth - w - 4)) + "px";
+    host.style.top = Math.max(0, r.top + 8) + "px";
+  }
+
+  function show(v) {
+    if (style === "hidden") return;
     current = v;
     attach();
-    host.style.left = Math.max(0, Math.min(r.right - 190, innerWidth - 200)) + "px";
-    host.style.top = Math.max(0, r.top + 8) + "px";
     host.style.display = "block";
+    place();
     clearTimeout(hideTimer);
     if (!overHost) hideTimer = setTimeout(hide, 2500);
   }
@@ -49,8 +72,9 @@
 
   document.addEventListener("mousemove", e => {
     if (e.composedPath().includes(host)) { clearTimeout(hideTimer); return; }
+    if (style === "hidden") return;
     const hit = videoUnderPointer(e.clientX, e.clientY);
-    if (hit) show(hit.v, hit.r); else if (!menu.hidden) { /* keep open while picking */ } else hide();
+    if (hit) show(hit.v); else if (!menu.hidden) { /* keep open while picking */ } else hide();
   }, true);
 
   function candidates() {
@@ -70,7 +94,7 @@
       .map(t => ({ url: t.src, lang: t.srclang || "", label: t.label || "" }));
   }
 
-  function say(text) { menu.hidden = false; menu.innerHTML = ""; const d = document.createElement("div"); d.className = "msg"; d.textContent = text; menu.append(d); }
+  function say(text) { menu.hidden = false; menu.innerHTML = ""; const d = document.createElement("div"); d.className = "msg"; d.textContent = text; menu.append(d); place(); }
 
   btn.addEventListener("click", async e => {
     e.stopPropagation();
@@ -88,5 +112,6 @@
       d.onclick = () => { api.runtime.sendMessage({ type: "download", url: m.url, referrer: location.href, filename: m.name, subs: r.subs || [] }); hide(); };
       menu.append(d);
     }
+    place();
   });
 })();

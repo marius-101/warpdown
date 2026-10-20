@@ -14,7 +14,8 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Other — created automatically;
   files are sorted into them (file types are recognised from the name, `Content-Type` or the file's first bytes)
 - **Browser integration** (Firefox and Chromium family): takes over browser downloads, a "Download with Warpdown"
-  context menu, and a floating **Download this video** button over page videos
+  context menu, and a floating **Download this video** button over page videos (full, compact arrow-only, or hidden — your choice in the
+  toolbar popup)
 - **Video streams**: plain files and **HLS (`.m3u8`)** streams, including AES-128 encrypted ones, merged to MP4
   with ffmpeg. *DRM-protected streams are not supported and never will be.*
 - **Subtitles**: pick which tracks to save (`.vtt` / `.srt` / `.ass`), stored next to the video with the language in
