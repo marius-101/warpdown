@@ -44,8 +44,13 @@
   },
   "browser_specific_settings": {
     "gecko": {
-      "id": "warpdown@warpdown.local",
-      "strict_min_version": "121.0"
+      "id": "warpdown@marius-101.github.io",
+      "strict_min_version": "140.0",
+      "data_collection_permissions": {
+        "required": [
+          "none"
+        ]
+      }
     }
   },
   "icons": {
@@ -53,5 +58,7 @@
     "32": "icons/32.png",
     "48": "icons/48.png",
     "128": "icons/128.png"
-  }
+  },
+  "homepage_url": "https://github.com/marius-101/warpdown",
+  "author": "marius-101"
 }

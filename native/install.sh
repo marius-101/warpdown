@@ -25,14 +25,15 @@ for d in google-chrome chromium BraveSoftware/Brave-Browser vivaldi microsoft-ed
 done
 
 # Firefox uses allowed_extensions, Chromium-family uses allowed_origins.
-FF_ID="warpdown@warpdown.local"
+FF_ID="warpdown@marius-101.github.io"            # the ID the published add-on uses
+FF_ID_DEV="warpdown@warpdown.local"                # earlier temporary development builds
 CHROME_ID="${WARPDOWN_CHROME_EXTENSION_ID:-}"   # set after loading the unpacked extension
 
 write_manifest() { # dir type
   mkdir -p "$1"
   if [ "$2" = firefox ]; then
     cat > "$1/$NAME.json" <<JSON
-{"name":"$NAME","description":"Warpdown native host","path":"$WRAPPER","type":"stdio","allowed_extensions":["$FF_ID"]}
+{"name":"$NAME","description":"Warpdown native host","path":"$WRAPPER","type":"stdio","allowed_extensions":["$FF_ID","$FF_ID_DEV"]}
 JSON
   elif [ -n "$CHROME_ID" ]; then
     cat > "$1/$NAME.json" <<JSON
@@ -55,7 +56,7 @@ exec flatpak-spawn --host "$WRAPPER"
 FPW
   chmod +x "$FP/.mozilla/warpdown-host-flatpak"
   cat > "$FP/.mozilla/native-messaging-hosts/$NAME.json" <<JSON
-{"name":"$NAME","description":"Warpdown native host","path":"$FP/.mozilla/warpdown-host-flatpak","type":"stdio","allowed_extensions":["$FF_ID"]}
+{"name":"$NAME","description":"Warpdown native host","path":"$FP/.mozilla/warpdown-host-flatpak","type":"stdio","allowed_extensions":["$FF_ID","$FF_ID_DEV"]}
 JSON
   echo "Flatpak Firefox detected. Also run once:  flatpak override --user --talk-name=org.freedesktop.Flatpak org.mozilla.firefox"
 fi

@@ -160,3 +160,54 @@ def test_extension_dialog_actions(qapp, monkeypatch):
     monkeypatch.setattr(browsers, "firefox_command", lambda: None)
     d.btn_ff.click()
     assert "wasn't found" in d.result.text()
+
+
+# ---------------- Firefox add-on package ----------------
+def _manifest():
+    import json
+    from pathlib import Path
+    return json.loads((Path(__file__).resolve().parent.parent / "extension" / "manifest.json").read_text())
+
+
+def test_manifest_is_ready_for_addons_mozilla_org():
+    import re
+    m = _manifest()
+    g = m["browser_specific_settings"]["gecko"]
+    assert re.fullmatch(r"[A-Za-z0-9._-]+@[A-Za-z0-9.-]+", g["id"]) and g["id"] == "warpdown@marius-101.github.io"
+    assert g["data_collection_permissions"] == {"required": ["none"]}      # mandatory for new add-ons since Nov 2025
+    assert int(g["strict_min_version"].split(".")[0]) >= 140                # first Firefox that understands it
+    assert len(m["description"]) <= 132 and m["manifest_version"] == 3
+    assert {"48", "128"} <= set(m["icons"])
+    assert "scripts" in m["background"]                                     # Firefox uses background scripts
+
+
+def test_manifest_files_exist():
+    from pathlib import Path
+    ext = Path(__file__).resolve().parent.parent / "extension"
+    m = _manifest()
+    refs = {m["action"]["default_popup"], *m["icons"].values(), *m["action"]["default_icon"].values(),
+            *m["background"]["scripts"], *(f for cs in m["content_scripts"] for f in cs["js"])}
+    assert [r for r in refs if not (ext / r).exists()] == []
+
+
+def test_firefox_package_omits_chrome_only_key_but_source_keeps_it(tmp_path, monkeypatch):
+    import json
+    import zipfile
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    monkeypatch.setattr(browsers, "project_root", lambda: root)
+    monkeypatch.setattr(browsers, "data_dir", lambda: tmp_path)
+    out = tmp_path / "pkg.xpi"
+    browsers._zip_extension(root / "extension", out)
+    z = zipfile.ZipFile(out)
+    fx = json.loads(z.read("manifest.json"))
+    assert "service_worker" not in fx["background"] and fx["background"]["scripts"] == ["background.js"]
+    assert "service_worker" in _manifest()["background"]                    # the Chrome build still needs it
+    assert {"background.js", "content.js", "popup.html", "popup.js", "icons/128.png"} <= set(z.namelist())
+
+
+def test_installer_trusts_the_published_and_the_development_id():
+    from pathlib import Path
+    s = (Path(__file__).resolve().parent.parent / "native" / "install.sh").read_text()
+    assert 'FF_ID="warpdown@marius-101.github.io"' in s and 'FF_ID_DEV="warpdown@warpdown.local"' in s
+    assert s.count('"allowed_extensions":["$FF_ID","$FF_ID_DEV"]') == 2        # regular + Flatpak Firefox

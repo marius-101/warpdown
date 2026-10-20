@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import shutil
 import subprocess
@@ -37,11 +38,24 @@ def installer_script() -> Path | None:
     return p if p.exists() else None
 
 
+def firefox_manifest(text: str) -> str:
+    """The manifest as Firefox wants it: `background.service_worker` is Chrome's key (Firefox uses `scripts`),
+    and Mozilla's validator warns about it, so the Firefox package leaves it out."""
+    m = json.loads(text)
+    m.get("background", {}).pop("service_worker", None)
+    return json.dumps(m, indent=2, ensure_ascii=False) + "\n"
+
+
 def _zip_extension(src: Path, out: Path) -> None:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(src.rglob("*")):
-            if f.is_file():
-                z.write(f, f.relative_to(src).as_posix())
+            if not f.is_file():
+                continue
+            name = f.relative_to(src).as_posix()
+            if name == "manifest.json":
+                z.writestr(name, firefox_manifest(f.read_text(encoding="utf-8")))
+            else:
+                z.write(f, name)
 
 
 def build_xpi() -> Path | None:
