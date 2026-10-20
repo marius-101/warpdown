@@ -717,7 +717,9 @@ class MainWindow(QMainWindow):
         split = QSplitter()
         split.addWidget(self.cats)
         split.addWidget(self.table)
-        split.setStretchFactor(1, 1)
+        split.setStretchFactor(0, 0)       # the list keeps its width when the window is resized...
+        split.setStretchFactor(1, 1)       # ...and the table takes all the extra space
+        self.split = split
         self.setCentralWidget(split)
 
         st = self.style()
@@ -838,6 +840,10 @@ class MainWindow(QMainWindow):
         cats_w = int(180 * min(k, 1.4))
         self.cats.setMaximumWidth(cats_w)
         self.cats.setIconSize(QSize(int(18 * k), int(18 * k)))
+        # Give the list exactly its (maximum) width. Without this the splitter starts with a default share that is
+        # wider than the list may grow, and the difference shows up as an empty bar next to the divider.
+        total = max(self.split.width(), self.width(), 1)
+        self.split.setSizes([cats_w, max(total - cats_w - self.split.handleWidth(), 1)])
         # grow the window (never shrink it) so the Name column keeps a usable width, up to the screen width
         needed = sum(int(w * k) for w in self._base_widths[1:]) + cats_w + int(260 * k) + 40
         scr = self.screen()

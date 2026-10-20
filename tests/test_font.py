@@ -92,3 +92,33 @@ def test_window_grows_for_bigger_text_but_never_shrinks_or_exceeds_screen(window
     w.resize(700, 400)
     w.set_font_size(24)
     assert w.width() <= 900                              # capped at the screen width
+
+
+def _gap_between_list_and_table(w):
+    w.show()
+    for _ in range(15):
+        QApplication.processEvents()
+    return w.table.geometry().left() - w.cats.geometry().right() - 1
+
+
+@pytest.mark.parametrize("pt,style,mode", [(0, "default", "auto"), (12, "kubuntu", "dark"), (16, "win11", "light")])
+def test_no_empty_bar_between_category_list_and_table(qapp, tmp_path, monkeypatch, pt, style, mode):
+    """Regression: the splitter used to start with a share wider than the list's maximum, leaving a fat empty bar."""
+    from warpdown import themes
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    gui.apply_font(pt)
+    themes.apply_theme(style, mode)
+    m = DownloadManager()
+    w = gui.MainWindow(m)
+    w.resize(1200, 620)
+    try:
+        handle = w.split.handleWidth()
+        assert _gap_between_list_and_table(w) <= handle + 1          # just the divider, nothing more
+        w.set_font_size(20 if pt != 20 else 8)                       # changing the text size must not reopen the gap
+        assert _gap_between_list_and_table(w) <= handle + 1
+        w.set_theme("win11", "dark")
+        assert _gap_between_list_and_table(w) <= handle + 1
+    finally:
+        gui.apply_font(0)
+        themes.apply_theme("default", "auto")
+        m.shutdown()
