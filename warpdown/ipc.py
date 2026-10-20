@@ -10,7 +10,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 
 
 def socket_name() -> str:
-    return f"kudm-{os.getuid()}"
+    return f"warpdown-{os.getuid()}"
 
 
 def send(msg: dict, timeout_ms: int = 1500) -> bool:

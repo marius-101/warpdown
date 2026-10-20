@@ -1,8 +1,8 @@
 // Floating "Download this video" button, like IDM's. Shown when the mouse is over a <video>.
 (() => {
   const api = typeof browser !== "undefined" ? browser : chrome;
-  if (window.__kudmContent) return;
-  window.__kudmContent = true;
+  if (window.__warpdownContent) return;
+  window.__warpdownContent = true;
 
   const host = document.createElement("div");
   host.style.cssText = "all:initial;position:fixed;z-index:2147483647;display:none;top:0;left:0;";
@@ -79,7 +79,7 @@
     try { r = await api.runtime.sendMessage({ type: "grab", candidates: candidates(), tracks: tracks(), title: document.title, page: location.href }); }
     catch (err) { return say("Extension error: " + err); }
     if (!r || r.error) return say(r && r.error || "Nothing found.");
-    if (r.sent) { say(r.via === "yt-dlp" ? "Sent page to KUDM (yt-dlp) ✓" : "Sent to KUDM ✓"); return setTimeout(hide, 1500); }
+    if (r.sent) { say(r.via === "yt-dlp" ? "Sent page to Warpdown (yt-dlp) ✓" : "Sent to Warpdown ✓"); return setTimeout(hide, 1500); }
     menu.innerHTML = "";
     for (const m of r.list) {
       const d = document.createElement("div");

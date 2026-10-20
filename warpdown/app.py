@@ -1,4 +1,4 @@
-"""Entry point: `python -m kudm [URL ...]`."""
+"""Entry point: `python -m warpdown [URL ...]`."""
 
 from __future__ import annotations
 
@@ -10,16 +10,17 @@ from PySide6.QtWidgets import QApplication
 from . import ipc
 from .gui import MainWindow, apply_settings
 from .manager import DownloadManager
-from .util import default_download_dir
+from .util import default_download_dir, migrate_legacy_data
 
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
     urls = [a for a in argv[1:] if a.startswith(("http://", "https://", "ftp://"))]
 
+    migrate_legacy_data()      # KUDM -> Warpdown (0.5): carry over the download list and settings
     app = QApplication(argv)
-    app.setApplicationName("kudm")
-    app.setOrganizationName("kudm")
+    app.setApplicationName("warpdown")
+    app.setOrganizationName("warpdown")
     app.setQuitOnLastWindowClosed(False)
 
     # Already running? Hand the URLs over (or just raise the window) and exit.

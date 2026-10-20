@@ -1,12 +1,12 @@
 import time
 
 
-from kudm import ipc
+from warpdown import ipc
 
 
 def test_ipc_roundtrip_many_messages(qapp, monkeypatch):
     app = qapp
-    monkeypatch.setattr(ipc, "socket_name", lambda: "kudm-test-ipc")
+    monkeypatch.setattr(ipc, "socket_name", lambda: "warpdown-test-ipc")
     srv = ipc.IpcServer()
     assert srv.listen()
     got = []
@@ -27,7 +27,7 @@ def test_ipc_roundtrip_many_messages(qapp, monkeypatch):
 def test_nested_event_loop_in_handler_does_not_crash(qapp, monkeypatch):
     """Regression: a modal dialog opened directly in the handler crashed Qt."""
     from PySide6.QtCore import QEventLoop, QTimer
-    monkeypatch.setattr(ipc, "socket_name", lambda: "kudm-test-ipc2")
+    monkeypatch.setattr(ipc, "socket_name", lambda: "warpdown-test-ipc2")
     srv = ipc.IpcServer()
     assert srv.listen()
     handled = []

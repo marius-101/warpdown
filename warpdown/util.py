@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import re
+import shutil
 from email.message import Message
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -11,14 +12,14 @@ from urllib.parse import unquote, urlsplit
 
 def data_dir() -> Path:
     base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    p = base / "kudm"
+    p = base / "warpdown"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def config_dir() -> Path:
     base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
-    p = base / "kudm"
+    p = base / "warpdown"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
@@ -152,3 +153,25 @@ def guess_extension(name: str, content_type: str = "", head: bytes = b"") -> str
     if has_extension(name):
         return ""
     return _EXT_BY_TYPE.get(content_type.split(";")[0].strip().lower(), "") or sniff_ext(head)
+
+
+def migrate_legacy_data() -> list[str]:
+    """Warpdown was called KUDM before version 0.5: copy the download list and settings over, once.
+
+    Copies (never moves), so the old folders stay as a backup. Does nothing if the new folders already exist.
+    """
+    done: list[str] = []
+    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    conf_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    old, new = data_home / "kudm", data_home / "warpdown"
+    if old.is_dir() and not new.exists():
+        shutil.copytree(old, new)
+        done.append(f"download list copied from {old}")
+    old, new = conf_home / "kudm", conf_home / "warpdown"
+    if old.is_dir() and not new.exists():
+        shutil.copytree(old, new)
+        legacy = new / "kudm.conf"                       # QSettings file is named after the application
+        if legacy.exists():
+            legacy.rename(new / "warpdown.conf")
+        done.append(f"settings copied from {old}")
+    return done

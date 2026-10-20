@@ -1,6 +1,6 @@
 """yt-dlp integration: YouTube & other video sites that don't expose a plain file or HLS playlist.
 
-yt-dlp is run as a subprocess (`python -m yt_dlp`), so a yt-dlp crash or update never takes KUDM down.
+yt-dlp is run as a subprocess (`python -m yt_dlp`), so a yt-dlp crash or update never takes Warpdown down.
 DRM-protected streams are not (and cannot be) handled; yt-dlp itself refuses those.
 """
 
@@ -72,7 +72,7 @@ def version() -> str:
 
 
 def update() -> tuple[bool, str]:
-    """pip-upgrade yt-dlp inside KUDM's own environment (sites change often; old versions break)."""
+    """pip-upgrade yt-dlp inside Warpdown's own environment (sites change often; old versions break)."""
     r = subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"],
                        capture_output=True, text=True, timeout=300)
     out = (r.stdout if r.returncode == 0 else r.stderr).strip().splitlines()
@@ -116,8 +116,8 @@ def fetch_info(url: str, headers: dict | None = None, timeout: float = 90) -> di
 
 
 def parse_progress(line: str) -> tuple[str, int, int, float] | None:
-    """'KUDMP|downloaded|total|estimate|speed|filename' -> (filename, downloaded, total, speed)."""
-    if not line.startswith("KUDMP|"):
+    """'WDPROG|downloaded|total|estimate|speed|filename' -> (filename, downloaded, total, speed)."""
+    if not line.startswith("WDPROG|"):
         return None
     parts = line.rstrip("\n").split("|", 5)
     if len(parts) < 6:
@@ -154,7 +154,7 @@ class YtdlpDownloader:
     def start(self) -> None:
         self._stop.clear()
         self.error, self.done = None, False
-        self._main_thread = threading.Thread(target=self._main, daemon=True, name="kudm-ytdlp")
+        self._main_thread = threading.Thread(target=self._main, daemon=True, name="warpdown-ytdlp")
         self._main_thread.start()
 
     def stop(self, wait: bool = True) -> None:
@@ -185,9 +185,9 @@ class YtdlpDownloader:
         stem = job.dest.with_suffix("")
         args = [*CMD, *_common_args(job.headers, job.url), "--newline", "--progress", "--no-simulate", "--continue",
                 "--progress-template",
-                "download:KUDMP|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|"
+                "download:WDPROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|"
                 "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.filename)s",
-                "--print", "after_move:KUDMDONE|%(filepath)s", "-o", f"{stem}.%(ext)s"]
+                "--print", "after_move:WDDONE|%(filepath)s", "-o", f"{stem}.%(ext)s"]
         if o.get("audio_only"):
             args += ["-f", QUALITIES[AUDIO_ONLY], "-x", "--audio-format", "mp3"]
         else:
@@ -215,7 +215,7 @@ class YtdlpDownloader:
                     name, dl, total, speed = prog
                     self._streams[name] = (dl, total)
                     self._speed = speed
-                elif line.startswith("KUDMDONE|"):
+                elif line.startswith("WDDONE|"):
                     self._final = line.split("|", 1)[1].strip()
                 elif line.strip():
                     self._tail.append(line.strip())

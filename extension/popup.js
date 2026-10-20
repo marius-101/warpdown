@@ -35,6 +35,6 @@ document.getElementById("yt").onclick = async () => {
   const [tab] = await api.tabs.query({ active: true, currentWindow: true });
   const out = document.getElementById("ytr"); out.textContent = "…";
   api.runtime.sendMessage({ type: "ytdlp", url: tab.url }).then(
-    r => { out.textContent = r && r.ok ? "Sent to KUDM ✓" : "Failed: " + ((r && r.error) || "KUDM not reachable"); },
+    r => { out.textContent = r && r.ok ? "Sent to Warpdown ✓" : "Failed: " + ((r && r.error) || "Warpdown not reachable"); },
     e => { out.textContent = "Failed: " + e; });
 };

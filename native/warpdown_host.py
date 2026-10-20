@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Native messaging host: browser extension -> running KUDM instance."""
+"""Native messaging host: browser extension -> running Warpdown instance."""
 import json
 import os
 import struct
@@ -9,7 +9,7 @@ import time
 
 from PySide6.QtCore import QCoreApplication
 
-from kudm import ipc
+from warpdown import ipc
 
 
 def read_message():
@@ -27,7 +27,7 @@ def write_message(obj):
 
 
 def log(text):
-    d = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "kudm")
+    d = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "warpdown")
     os.makedirs(d, exist_ok=True)
     with open(os.path.join(d, "host.log"), "a") as f:
         f.write(f"{time.strftime('%H:%M:%S')} {text}\n")
@@ -46,7 +46,7 @@ def main():
             continue
         ok = ipc.send(msg)
         if not ok:
-            subprocess.Popen([sys.executable, "-m", "kudm"], start_new_session=True,
+            subprocess.Popen([sys.executable, "-m", "warpdown"], start_new_session=True,
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             for _ in range(30):
                 time.sleep(0.3)

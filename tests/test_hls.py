@@ -8,8 +8,8 @@ import time
 
 import pytest
 
-from kudm.engine import Job, is_hls, probe
-from kudm.hls import HlsDownloader, HlsError, parse_master, parse_media
+from warpdown.engine import Job, is_hls, probe
+from warpdown.hls import HlsDownloader, HlsError, parse_master, parse_media
 
 pytestmark = pytest.mark.skipif(not shutil.which("ffmpeg"), reason="ffmpeg needed to build test streams")
 

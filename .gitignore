@@ -2,5 +2,5 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-native/kudm-host
+native/warpdown-host
 dist/

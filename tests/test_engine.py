@@ -1,7 +1,7 @@
 import os
 import time
 
-from kudm.engine import Downloader, Job, probe
+from warpdown.engine import Downloader, Job, probe
 from tests.rangeserver import make_server
 
 PAYLOAD = os.urandom(12 * 1024 * 1024 + 123)

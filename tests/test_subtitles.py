@@ -4,9 +4,9 @@ import os
 import threading
 import time
 
-from kudm.hls import parse_subtitle_tracks
-from kudm.manager import COMPLETED, DownloadManager
-from kudm.subtitles import fetch_subtitle, merge_vtt, sniff_subtitle, tag_for
+from warpdown.hls import parse_subtitle_tracks
+from warpdown.manager import COMPLETED, DownloadManager
+from warpdown.subtitles import fetch_subtitle, merge_vtt, sniff_subtitle, tag_for
 from tests.rangeserver import make_server
 
 VTT = "WEBVTT\n\n00:00:01.000 --> 00:00:02.000\nHello\n"
@@ -84,7 +84,7 @@ def test_manager_saves_subtitles_next_to_video(qapp, tmp_path, monkeypatch):
 
 
 def test_language_filter_and_dedupe(tmp_path):
-    from kudm.subtitles import matches_langs, parse_langs, peek_subtitle
+    from warpdown.subtitles import matches_langs, parse_langs, peek_subtitle
     assert parse_langs("eng, en ,") == ["eng", "en"]
     assert matches_langs("eng", ["eng", "en"]) and matches_langs("en-US", ["en"]) and matches_langs("English", ["eng"])
     assert not matches_langs("ara", ["eng", "en"]) and not matches_langs("chi", ["eng", "en"])
@@ -106,7 +106,7 @@ def test_language_filter_and_dedupe(tmp_path):
 
 
 def test_labels_tags_and_default_selection():
-    from kudm.subtitles import default_checked, tag_for, track_kind
+    from warpdown.subtitles import default_checked, tag_for, track_kind
     assert track_kind("English (SDH)") == "sdh" and track_kind("Signs & Songs") == "signs" and track_kind("English") == ""
     assert tag_for("eng", "English (SDH)", "http://x/a.vtt") == "eng.sdh"
     assert tag_for("eng", "English", "http://x/a.vtt") == "eng"
@@ -131,7 +131,7 @@ def test_probe_reports_hls_subtitle_tracks(tmp_path):
         '#EXTM3U\n#EXT-X-MEDIA:TYPE=SUBTITLES,GROUP-ID="s",NAME="English (SDH)",LANGUAGE="eng",URI="s1.m3u8"\n'
         '#EXT-X-STREAM-INF:BANDWIDTH=1000,SUBTITLES="s"\nv.m3u8\n')
     srv, base = serve_dir(site)
-    from kudm.engine import probe
+    from warpdown.engine import probe
     p = probe(f"{base}/m.m3u8")
     assert p.hls and p.sub_tracks == [{"url": f"{base}/s1.m3u8", "lang": "eng", "label": "English (SDH)"}]
     srv.shutdown()

@@ -147,7 +147,7 @@ class HlsDownloader:
     def start(self) -> None:
         self._stop.clear()
         self.error, self.done = None, False
-        self._main_thread = threading.Thread(target=self._main, daemon=True, name="kudm-hls")
+        self._main_thread = threading.Thread(target=self._main, daemon=True, name="warpdown-hls")
         self._main_thread.start()
 
     def stop(self, wait: bool = True) -> None:

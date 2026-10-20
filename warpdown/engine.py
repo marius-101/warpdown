@@ -28,7 +28,7 @@ UNKNOWN = 1 << 62
 # One shared TLS context, built once at import time on the main thread. Creating contexts
 # concurrently from many threads (each loading the CA bundle) segfaults in OpenSSL here.
 SSL_CONTEXT = ssl.create_default_context()
-USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) KUDM/0.1"
+USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) Warpdown/0.1"
 
 
 @dataclass
@@ -139,7 +139,10 @@ class Downloader:
         self.limiter = limiter or RateLimiter(0)
         self.on_finish = on_finish
         self.part = Path(str(job.dest) + ".part")
-        self.state_file = Path(str(job.dest) + ".part.kudm")
+        self.state_file = Path(str(job.dest) + ".part.warpdown")
+        legacy = Path(str(job.dest) + ".part.kudm")          # state file written before the rename
+        if legacy.exists() and not self.state_file.exists():
+            legacy.rename(self.state_file)
         self.segments: list[Segment] = []
         self.error: str | None = None
         self.done = False
@@ -156,7 +159,7 @@ class Downloader:
         self.error = None
         self.done = False
         self._fatal = None
-        t = threading.Thread(target=self._main, daemon=True, name="kudm-dl")
+        t = threading.Thread(target=self._main, daemon=True, name="warpdown-dl")
         self._main_thread = t
         t.start()
 
@@ -222,7 +225,7 @@ class Downloader:
             nthreads = len(self.segments) if job.resumable else 1
             nthreads = max(1, min(nthreads, job.connections))
             self._threads = [
-                threading.Thread(target=self._worker, daemon=True, name=f"kudm-w{i}")
+                threading.Thread(target=self._worker, daemon=True, name=f"warpdown-w{i}")
                 for i in range(nthreads)
             ]
             for t in self._threads:

@@ -2,7 +2,7 @@ import os
 import time
 
 
-from kudm.manager import COMPLETED, DownloadManager
+from warpdown.manager import COMPLETED, DownloadManager
 from tests.rangeserver import make_server
 
 PAYLOAD = os.urandom(5 * 1024 * 1024 + 7)
@@ -26,7 +26,7 @@ def test_manager_end_to_end(qapp, tmp_path, monkeypatch):
 
 
 def test_category_folders(qapp, tmp_path, monkeypatch):
-    from kudm.util import CATEGORIES, ensure_category_dirs
+    from warpdown.util import CATEGORIES, ensure_category_dirs
     ensure_category_dirs(tmp_path)
     assert {d.name for d in tmp_path.iterdir()} == set(CATEGORIES) | {"Other"}
 
@@ -49,7 +49,7 @@ def test_category_folders(qapp, tmp_path, monkeypatch):
 
 def test_extension_guessing_and_sorting(qapp, tmp_path, monkeypatch):
     """A page-title name with no extension must still become .mp4 and land in Video/."""
-    from kudm.util import guess_extension, sniff_ext
+    from warpdown.util import guess_extension, sniff_ext
     mp4 = b"\x00\x00\x00\x18ftypisom\x00\x00\x02\x00" + b"\x00" * 64
     assert sniff_ext(mp4) == ".mp4" and guess_extension("clip", "video/mp4") == ".mp4"
     assert guess_extension("clip.mkv", "video/mp4") == "" and guess_extension("Episode 1", "", mp4) == ".mp4"
@@ -66,3 +66,32 @@ def test_extension_guessing_and_sorting(qapp, tmp_path, monkeypatch):
     assert (tmp_path / "Video" / "Echovideo - Some Title : Episode 1.mp4").exists()
     m.shutdown()
     srv.shutdown()
+
+
+def test_migration_from_kudm(tmp_path, monkeypatch):
+    """0.5 renamed KUDM -> Warpdown: the download list and settings must carry over, once, without overwriting."""
+    from warpdown.util import migrate_legacy_data
+    data, conf = tmp_path / "data", tmp_path / "conf"
+    monkeypatch.setenv("XDG_DATA_HOME", str(data))
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(conf))
+    (data / "kudm").mkdir(parents=True)
+    (data / "kudm" / "downloads.json").write_text('[{"url": "http://x/a.bin", "directory": "/tmp"}]')
+    (conf / "kudm").mkdir(parents=True)
+    (conf / "kudm" / "kudm.conf").write_text("[General]\nconnections=12\n")
+
+    assert len(migrate_legacy_data()) == 2
+    assert (data / "warpdown" / "downloads.json").read_text().startswith('[{"url"')
+    assert (conf / "warpdown" / "warpdown.conf").read_text() == "[General]\nconnections=12\n"
+    assert (data / "kudm" / "downloads.json").exists()            # old data stays as a backup
+
+    (data / "warpdown" / "downloads.json").write_text("[]")      # user data created later must never be overwritten
+    assert migrate_legacy_data() == []
+    assert (data / "warpdown" / "downloads.json").read_text() == "[]"
+
+
+def test_legacy_resume_state_file_is_adopted(tmp_path):
+    from warpdown.engine import Downloader, Job
+    dest = tmp_path / "big.bin"
+    (tmp_path / "big.bin.part.kudm").write_text("{}")
+    d = Downloader(Job("http://x/big.bin", dest))
+    assert d.state_file.exists() and not (tmp_path / "big.bin.part.kudm").exists()

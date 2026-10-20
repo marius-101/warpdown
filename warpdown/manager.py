@@ -140,7 +140,7 @@ class DownloadManager(QObject):
             eng.stop(wait=True)
         if it.filename:
             part = Path(str(it.path) + ".part")
-            for p in (part, Path(str(part) + ".kudm")):
+            for p in (part, Path(str(part) + ".warpdown"), Path(str(part) + ".kudm")):
                 p.unlink(missing_ok=True)
             if delete_files:
                 it.path.unlink(missing_ok=True)

@@ -466,7 +466,7 @@ class MainWindow(QMainWindow):
     def __init__(self, mgr: DownloadManager):
         super().__init__()
         self.mgr = mgr
-        self.setWindowTitle(f"KUDM — KUbuntu Download Manager {__version__}")
+        self.setWindowTitle(f"Warpdown — fast download manager {__version__}")
         self.resize(1200, 620)
         self.model = Model(mgr)
         self.table = QTableView()

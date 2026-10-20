@@ -1,10 +1,10 @@
-# KUDM — KUbuntu Download Manager
+# Warpdown — fast download manager
 
 An open-source, [Internet Download Manager](https://www.internetdownloadmanager.com/)-style download manager for
 Linux, built and tested on Kubuntu (KDE Plasma, Wayland). Fast multi-connection downloads, a browser extension that
 takes over downloads and grabs videos, subtitles, and YouTube support through yt-dlp.
 
-![KUDM main window](docs/screenshot.png)
+![Warpdown main window](docs/screenshot.png)
 
 ## Features
 - **Fast segmented downloads** — up to 32 connections, with *dynamic segment splitting*: a connection that finishes
@@ -13,7 +13,7 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Queue** with a configurable number of simultaneous downloads and a global speed limit
 - **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Other — created automatically;
   files are sorted into them (file types are recognised from the name, `Content-Type` or the file's first bytes)
-- **Browser integration** (Firefox and Chromium family): takes over browser downloads, a "Download with KUDM"
+- **Browser integration** (Firefox and Chromium family): takes over browser downloads, a "Download with Warpdown"
   context menu, and a floating **Download this video** button over page videos
 - **Video streams**: plain files and **HLS (`.m3u8`)** streams, including AES-128 encrypted ones, merged to MP4
   with ffmpeg. *DRM-protected streams are not supported and never will be.*
@@ -26,11 +26,11 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 ## Install (Kubuntu / Ubuntu / Debian)
 ```bash
 sudo apt install python3-venv ffmpeg libxcb-cursor0     # ffmpeg: merging video/audio; libxcb-cursor0: Qt on X11
-git clone https://github.com/<your-user>/kubuntu-download-manager.git
-cd kubuntu-download-manager
+git clone https://github.com/marius-101/warpdown.git
+cd warpdown
 python3 -m venv .venv
 .venv/bin/pip install -r requirements.txt
-.venv/bin/python -m kudm                                 # start KUDM (add a URL as an argument to download it)
+.venv/bin/python -m warpdown                                 # start Warpdown (add a URL as an argument to download it)
 ```
 For **full YouTube quality** also install a JavaScript runtime: `sudo apt install nodejs`.
 
@@ -39,18 +39,18 @@ For **full YouTube quality** also install a JavaScript runtime: `sudo apt instal
 native/install.sh        # registers the native-messaging host and a desktop launcher
 ```
 **Firefox**
-1. `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…* → pick **`dist/kudm.xpi`**
+1. `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…* → pick **`dist/warpdown.xpi`**
    (build it first with `native/build_xpi.sh`). A temporary add-on has to be loaded again after Firefox restarts.
-2. Click the KUDM toolbar icon; if it shows a yellow notice, press **Grant access** (needed for the video button).
+2. Click the Warpdown toolbar icon; if it shows a yellow notice, press **Grant access** (needed for the video button).
 3. *Flatpak Firefox?* The installer prints one extra command to allow the native host; run it and restart Firefox.
 
 **Chrome / Chromium / Brave** — load the `extension/` folder unpacked, copy the extension ID, then run
-`KUDM_CHROME_EXTENSION_ID=<id> native/install.sh`.
+`WARPDOWN_CHROME_EXTENSION_ID=<id> native/install.sh`.
 
 ### Using it
-- Click a download link as usual — KUDM takes over and asks where to save it.
+- Click a download link as usual — Warpdown takes over and asks where to save it.
 - Hover over a video and press **Download this video**. On sites where the page itself is the source
-  (YouTube, …) it opens KUDM's yt-dlp mode.
+  (YouTube, …) it opens Warpdown's yt-dlp mode.
 - Settings has the default folder, connections, speed limit, subtitle languages, and an **Update yt-dlp** button
   (video sites change often; if a site stops working, update first).
 
@@ -58,15 +58,15 @@ native/install.sh        # registers the native-messaging host and a desktop lau
 ```bash
 QT_QPA_PLATFORM=offscreen .venv/bin/python -m pytest      # tests run against local servers; no internet needed
 ```
-Layout: `kudm/` (engine, HLS, subtitles, yt-dlp, manager, Qt GUI), `extension/` (browser extension),
+Layout: `warpdown/` (engine, HLS, subtitles, yt-dlp, manager, Qt GUI), `extension/` (browser extension),
 `native/` (native-messaging host + installer), `tests/`.
 
 ## Roadmap
-DASH (`.mpd`) streams, scheduler, site logins, per-site rules, checksum verification, batch / URL-pattern downloads,
+**Windows support** (installer + native-messaging registration), DASH (`.mpd`) streams, scheduler, site logins, per-site rules, checksum verification, batch / URL-pattern downloads,
 signed Firefox add-on, `.deb` / Flatpak packaging.
 
 ## Responsible use
-KUDM is a tool; you are responsible for what you download. Respect copyright and the terms of the sites you use.
+Warpdown is a tool; you are responsible for what you download. Respect copyright and the terms of the sites you use.
 
 ## License
 [MIT](LICENSE)

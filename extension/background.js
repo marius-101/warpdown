@@ -1,8 +1,8 @@
 const api = typeof browser !== "undefined" ? browser : chrome;
-const HOST = "org.kudm.host";
+const HOST = "org.warpdown.host";
 const media = {}; // tabId -> [{url, type, size}]
 const subsByTab = {}; // tabId -> [{url, lang, label}] detected .vtt/.srt/.ass requests
-console.log("[KUDM] background loaded");
+console.log("[Warpdown] background loaded");
 
 async function cookieHeader(url) {
   try {
@@ -11,7 +11,7 @@ async function cookieHeader(url) {
   } catch { return ""; }
 }
 
-async function sendToKudm(url, extra = {}) {
+async function sendToWarpdown(url, extra = {}) {
   const cookie = await cookieHeader(url);
   return api.runtime.sendNativeMessage(HOST, {
     action: "add", url,
@@ -34,7 +34,7 @@ function nameFor(title, m) {
 const isFragment = u => /[?&](range|bytes|sq|seg)=/i.test(u) || /\/videoplayback/.test(u) || /\.(ts|m4s|aac)(\?|$)/i.test(u);
 
 async function note(msg) {
-  console.log("[KUDM]", msg);
+  console.log("[Warpdown]", msg);
   await api.storage.local.set({ lastEvent: `${new Date().toLocaleTimeString()} ${msg}` });
 }
 note("background started");
@@ -49,24 +49,24 @@ api.downloads.onCreated.addListener(async (d) => {
   try {
     await api.downloads.cancel(d.id);
     await api.downloads.erase({ id: d.id });
-    const r = await sendToKudm(url, { referrer: d.referrer });
+    const r = await sendToWarpdown(url, { referrer: d.referrer });
     await note("host replied: " + JSON.stringify(r));
-    if (!r || !r.ok) throw new Error("KUDM not reachable");
+    if (!r || !r.ok) throw new Error("Warpdown not reachable");
   } catch (e) {
     await note("handoff FAILED: " + (e && e.message || e));
     api.downloads.download({ url });
   }
 });
 
-// Right-click "Download with KUDM".
+// Right-click "Download with Warpdown".
 api.runtime.onInstalled.addListener(() => {
-  api.contextMenus.create({ id: "kudm-link", title: "Download with KUDM", contexts: ["link", "video", "audio"] });
-  api.contextMenus.create({ id: "kudm-page", title: "Download this page's video with KUDM (yt-dlp)", contexts: ["page"] });
+  api.contextMenus.create({ id: "warpdown-link", title: "Download with Warpdown", contexts: ["link", "video", "audio"] });
+  api.contextMenus.create({ id: "warpdown-page", title: "Download this page's video with Warpdown (yt-dlp)", contexts: ["page"] });
 });
 api.contextMenus.onClicked.addListener((info, tab) => {
-  if (info.menuItemId === "kudm-page") return sendToKudm(info.pageUrl, { referrer: info.pageUrl, mode: "ytdlp" });
+  if (info.menuItemId === "warpdown-page") return sendToWarpdown(info.pageUrl, { referrer: info.pageUrl, mode: "ytdlp" });
   const url = info.linkUrl || info.srcUrl;
-  if (url) sendToKudm(url, { referrer: tab && tab.url });
+  if (url) sendToWarpdown(url, { referrer: tab && tab.url });
 });
 
 // Detect media streams per tab (for the popup).
@@ -109,9 +109,9 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
     for (const u of msg.candidates || []) add(u);
     for (const m of media[tabId] || []) add(m.url, m.type, m.size);
     if (!list.length) {
-      // Nothing downloadable as a plain file/HLS: let KUDM try yt-dlp on the page itself (YouTube etc.).
-      sendToKudm(msg.page, { referrer: msg.page, mode: "ytdlp" }).then(
-        r => reply(r && r.ok ? { sent: true, via: "yt-dlp" } : { error: "KUDM not reachable" }),
+      // Nothing downloadable as a plain file/HLS: let Warpdown try yt-dlp on the page itself (YouTube etc.).
+      sendToWarpdown(msg.page, { referrer: msg.page, mode: "ytdlp" }).then(
+        r => reply(r && r.ok ? { sent: true, via: "yt-dlp" } : { error: "Warpdown not reachable" }),
         e => reply({ error: String(e && e.message || e) }));
       return true;
     }
@@ -119,8 +119,8 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
     const subs = [];
     for (const t of [...(msg.tracks || []), ...(subsByTab[tabId] || [])]) if (!subs.some(x => x.url === t.url)) subs.push(t);
     if (list.length === 1) {
-      sendToKudm(list[0].url, { referrer: msg.page, filename: nf(list[0]), subs }).then(
-        r => reply(r && r.ok ? { sent: true } : { error: "KUDM not reachable" }),
+      sendToWarpdown(list[0].url, { referrer: msg.page, filename: nf(list[0]), subs }).then(
+        r => reply(r && r.ok ? { sent: true } : { error: "Warpdown not reachable" }),
         e => reply({ error: String(e && e.message || e) }));
     } else {
       list.sort((a, b) => (b.type === "hls") - (a.type === "hls") || b.size - a.size);
@@ -130,10 +130,10 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
     return true;
   }
   if (msg.type === "ytdlp") {
-    sendToKudm(msg.url, { referrer: msg.url, mode: "ytdlp" }).then(reply, e => reply({ ok: false, error: String(e) }));
+    sendToWarpdown(msg.url, { referrer: msg.url, mode: "ytdlp" }).then(reply, e => reply({ ok: false, error: String(e) }));
     return true;
   }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);
-  if (msg.type === "download") sendToKudm(msg.url, { referrer: msg.referrer, filename: msg.filename, subs: msg.subs || (subsByTab[msg.tabId] || []) }).then(reply);
+  if (msg.type === "download") sendToWarpdown(msg.url, { referrer: msg.referrer, filename: msg.filename, subs: msg.subs || (subsByTab[msg.tabId] || []) }).then(reply);
   return true;
 });

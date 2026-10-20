@@ -7,9 +7,9 @@ import time
 
 import pytest
 
-from kudm import ytdlp
-from kudm.engine import Job
-from kudm.manager import COMPLETED, DownloadManager
+from warpdown import ytdlp
+from warpdown.engine import Job
+from warpdown.manager import COMPLETED, DownloadManager
 
 pytestmark = pytest.mark.skipif(not (ytdlp.available() and shutil.which("ffmpeg")),
                                 reason="needs yt-dlp and ffmpeg")
@@ -31,8 +31,8 @@ def site(tmp_path):
 
 
 def test_parse_progress_and_hosts():
-    assert ytdlp.parse_progress("KUDMP|1024|223779|NA|334629.3|Clip.f395.mp4\n") == ("Clip.f395.mp4", 1024, 223779, 334629.3)
-    assert ytdlp.parse_progress("KUDMP|500|NA|9000|NA|a.m4a")[2] == 9000      # falls back to the estimate
+    assert ytdlp.parse_progress("WDPROG|1024|223779|NA|334629.3|Clip.f395.mp4\n") == ("Clip.f395.mp4", 1024, 223779, 334629.3)
+    assert ytdlp.parse_progress("WDPROG|500|NA|9000|NA|a.m4a")[2] == 9000      # falls back to the estimate
     assert ytdlp.parse_progress("[download] 5%") is None
     assert ytdlp.looks_like_video_site("https://www.youtube.com/watch?v=x") and ytdlp.looks_like_video_site("https://youtu.be/x")
     assert not ytdlp.looks_like_video_site("https://example.com/a.mp4")
