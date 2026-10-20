@@ -7,8 +7,9 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, Qt, QUrl, Signal
-from PySide6.QtGui import QAction, QColor, QDesktopServices, QGuiApplication, QIcon, QPainter, QPalette
+from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, QSize, Qt, QUrl, Signal
+from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence,
+                           QPainter, QPalette, QShortcut)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
@@ -24,6 +25,39 @@ from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Ite
 from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed, sanitize_filename
 
 _PEEK_SLOTS = threading.Semaphore(3)
+
+FONT_SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24]   # offered in Settings / by Ctrl +/-
+_BASE_FONT: QFont | None = None                                 # the system's own default font, captured once
+
+
+def base_font_pt() -> float:
+    pt = _BASE_FONT.pointSizeF() if _BASE_FONT is not None else QApplication.font().pointSizeF()
+    return pt if pt > 0 else 10.0
+
+
+def apply_font(size_pt: int) -> float:
+    """Set the application's text size in points (0 = the system default). Returns the scale vs. the default."""
+    global _BASE_FONT
+    app = QApplication.instance()
+    if _BASE_FONT is None:
+        _BASE_FONT = QFont(app.font())
+    f = QFont(_BASE_FONT)
+    if size_pt > 0:
+        f.setPointSizeF(float(size_pt))
+    app.setFont(f)
+    return font_scale()
+
+
+def font_scale() -> float:
+    pt = QApplication.font().pointSizeF()
+    return (pt if pt > 0 else base_font_pt()) / base_font_pt()
+
+
+def saved_font_size() -> int:
+    try:
+        return int(QSettings().value("font_size", 0) or 0)
+    except (TypeError, ValueError):
+        return 0
 
 COLUMNS = ["Name", "Size", "Progress", "Speed", "ETA", "Status", "Added"]
 CATS = ["All Downloads", "Unfinished", "Finished", "Video", "Music", "Compressed",
@@ -119,6 +153,7 @@ class ProgressDelegate(QStyledItemDelegate):
         rect = QRectF(option.rect.adjusted(4, 5, -4, -5))
         fill = QRectF(rect.left(), rect.top(), rect.width() * max(0, min(val, 1000)) / 1000.0, rect.height())
         painter.save()
+        painter.setFont(option.font)
         painter.setRenderHint(QPainter.Antialiasing)
         painter.setPen(Qt.NoPen)
         groove = QColor(pal.color(QPalette.Mid)); groove.setAlpha(110)
@@ -150,7 +185,7 @@ class AddDialog(QDialog):
                       for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
         self._yt_user_set = use_ytdlp            # don't auto-toggle if the browser already told us the mode
         self.setWindowTitle("Add Download")
-        self.setMinimumWidth(520)
+        self.setMinimumWidth(int(520 * font_scale()))
         self.url = QLineEdit(url)
         self.url.setPlaceholderText("https://example.com/file.zip")
         self.info = QLabel("")
@@ -403,6 +438,7 @@ class AddDialog(QDialog):
 
 class SettingsDialog(QDialog):
     yt_updated = Signal(bool, str)
+    font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
 
     def __init__(self, parent, mgr: DownloadManager):
         super().__init__(parent)
@@ -420,7 +456,15 @@ class SettingsDialog(QDialog):
         self.limit = QSpinBox(); self.limit.setRange(0, 1_000_000); self.limit.setSuffix(" KB/s")
         self.limit.setSpecialValueText("Unlimited")
         self.limit.setValue(int(s.value("speed_limit_kb", 0)))
+        self.fontsize = QComboBox()
+        self.fontsize.addItem(f"System default ({base_font_pt():.0f} pt)", 0)
+        for pt in FONT_SIZES:
+            self.fontsize.addItem(f"{pt} pt", pt)
+        idx = self.fontsize.findData(saved_font_size())
+        self.fontsize.setCurrentIndex(idx if idx >= 0 else 0)
+        self.fontsize.currentIndexChanged.connect(lambda _i: self.font_preview.emit(self.fontsize.currentData()))
         form = QFormLayout(self)
+        form.addRow("Text size:", self.fontsize)
         form.addRow("Default folder:", self.dir)
         form.addRow("", self.sort)
         form.addRow("Connections per download:", self.conns)
@@ -480,8 +524,7 @@ class MainWindow(QMainWindow):
         h.setSectionResizeMode(QHeaderView.Interactive)
         h.setStretchLastSection(False)
         h.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i, w in enumerate([300, 75, 140, 85, 65, 150, 125]):
-            self.table.setColumnWidth(i, w)
+        self._base_widths = [300, 75, 140, 85, 65, 150, 125]
         self.table.doubleClicked.connect(self._open_file)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -499,6 +542,8 @@ class MainWindow(QMainWindow):
 
         st = self.style()
         tb = QToolBar("Main"); tb.setMovable(False)
+        self.toolbar = tb
+        self._base_icon = tb.iconSize()
         tb.setToolButtonStyle(Qt.ToolButtonTextUnderIcon)
         self.addToolBar(tb)
         self._act(tb, "Add URL", QIcon.fromTheme("list-add", st.standardIcon(QStyle.SP_FileDialogNewFolder)),
@@ -512,6 +557,11 @@ class MainWindow(QMainWindow):
         tb.addSeparator()
         self._act(tb, "Settings", QIcon.fromTheme("configure", st.standardIcon(QStyle.SP_FileDialogDetailedView)),
                   self.settings_dialog)
+
+        for keys, delta in ((QKeySequence.ZoomIn, 1), (QKeySequence("Ctrl+="), 1), (QKeySequence.ZoomOut, -1)):
+            QShortcut(keys, self, activated=lambda d=delta: self.zoom(d))
+        QShortcut(QKeySequence("Ctrl+0"), self, activated=lambda: self.zoom(0))
+        self.rescale()
 
         self.status = self.statusBar()
         mgr.changed.connect(self._update_status)
@@ -530,6 +580,42 @@ class MainWindow(QMainWindow):
         self.tray.show()
         mgr.changed.connect(self._notify_done)
         self._notified: set[str] = set()
+
+    def rescale(self) -> None:
+        """Make columns, row height and toolbar icons follow the current text size."""
+        k = font_scale()
+        for i, w in enumerate(self._base_widths):
+            self.table.setColumnWidth(i, int(w * k))
+        # use the application font, not the table's own: widgets pick up a new app font a moment later
+        self.table.verticalHeader().setDefaultSectionSize(QFontMetrics(QApplication.font()).height() + 10)
+        self.toolbar.setIconSize(QSize(int(self._base_icon.width() * k), int(self._base_icon.height() * k)))
+        cats_w = int(180 * min(k, 1.4))
+        self.cats.setMaximumWidth(cats_w)
+        # grow the window (never shrink it) so the Name column keeps a usable width, up to the screen width
+        needed = sum(int(w * k) for w in self._base_widths[1:]) + cats_w + int(260 * k) + 40
+        scr = self.screen()
+        if scr is not None:
+            needed = min(needed, scr.availableGeometry().width())
+        if self.width() < needed:
+            self.resize(needed, self.height())
+
+    def set_font_size(self, size_pt: int) -> None:
+        apply_font(size_pt)
+        self.rescale()
+
+    def zoom(self, delta: int) -> None:
+        """Ctrl+ / Ctrl- / Ctrl+0: step through the text sizes (0 resets to the system default)."""
+        if delta == 0:
+            new = 0
+        else:
+            sizes = sorted(set(FONT_SIZES + [round(base_font_pt())]))
+            cur = round(QApplication.font().pointSizeF())
+            i = min(range(len(sizes)), key=lambda j: abs(sizes[j] - cur))
+            new = sizes[max(0, min(len(sizes) - 1, i + delta))]
+            if new == round(base_font_pt()):
+                new = 0
+        QSettings().setValue("font_size", new)
+        self.set_font_size(new)
 
     def _act(self, tb, text, icon, slot, shortcut=None):
         a = QAction(icon, text, self)
@@ -597,7 +683,9 @@ class MainWindow(QMainWindow):
                 self.mgr.remove(iid, delete_files=box.clickedButton() is wipe)
 
     def settings_dialog(self):
+        original_font = saved_font_size()
         d = SettingsDialog(self, self.mgr)
+        d.font_preview.connect(self.set_font_size)
         if d.exec() == QDialog.Accepted:
             s = QSettings()
             s.setValue("download_dir", d.dir.text())
@@ -606,7 +694,11 @@ class MainWindow(QMainWindow):
             s.setValue("max_active", d.active.value())
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
+            s.setValue("font_size", int(d.fontsize.currentData()))
+            self.set_font_size(int(d.fontsize.currentData()))
             apply_settings(self.mgr)
+        else:
+            self.set_font_size(original_font)          # cancelled: undo the live preview
 
     def _open_file(self, idx):
         it = self.model.item(idx.row())

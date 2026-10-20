@@ -21,6 +21,7 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
   the name (`Movie.eng.vtt`) so players like Haruna and mpv pick them up automatically
 - **yt-dlp mode** for YouTube, Vimeo and many other sites: choose quality (best / 1080p / … / audio-only MP3),
   H.264/AAC MP4 output, subtitles. The browser button falls back to it when a page has no plain file or HLS stream
+- **Adjustable text size** — *Settings → Text size* (live preview), or `Ctrl +` / `Ctrl -` / `Ctrl 0` in the main window
 - Tray icon, completion notifications, pure Python + Qt (PySide6) — no aria2 or other daemons needed
 
 ## Install (Kubuntu / Ubuntu / Debian)
