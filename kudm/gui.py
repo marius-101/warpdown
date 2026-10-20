@@ -467,7 +467,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.mgr = mgr
         self.setWindowTitle(f"KUDM — KUbuntu Download Manager {__version__}")
-        self.resize(1100, 600)
+        self.resize(1200, 620)
         self.model = Model(mgr)
         self.table = QTableView()
         self.table.setModel(self.model)
@@ -480,7 +480,7 @@ class MainWindow(QMainWindow):
         h.setSectionResizeMode(QHeaderView.Interactive)
         h.setStretchLastSection(False)
         h.setSectionResizeMode(0, QHeaderView.Stretch)
-        for i, w in enumerate([340, 80, 160, 90, 70, 180, 130]):
+        for i, w in enumerate([300, 75, 140, 85, 65, 150, 125]):
             self.table.setColumnWidth(i, w)
         self.table.doubleClicked.connect(self._open_file)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
@@ -515,6 +515,8 @@ class MainWindow(QMainWindow):
 
         self.status = self.statusBar()
         mgr.changed.connect(self._update_status)
+        mgr.added.connect(self._update_status)
+        mgr.removed.connect(self._update_status)
         self._update_status()
 
         self.tray = QSystemTrayIcon(QIcon.fromTheme("folder-download", st.standardIcon(QStyle.SP_ArrowDown)), self)
