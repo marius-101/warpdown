@@ -175,3 +175,13 @@ def migrate_legacy_data() -> list[str]:
             legacy.rename(new / "warpdown.conf")
         done.append(f"settings copied from {old}")
     return done
+
+
+def category_folder(base: Path, name: str) -> Path | None:
+    """Folder shown by a left-hand list entry: the download folder itself, a category subfolder, or None
+    for entries that aren't folders (Unfinished / Finished)."""
+    if name == "All Downloads":
+        return Path(base)
+    if name in CATEGORIES or name == "Other":
+        return Path(base) / name
+    return None

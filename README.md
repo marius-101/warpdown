@@ -21,6 +21,10 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
   the name (`Movie.eng.vtt`) so players like Haruna and mpv pick them up automatically
 - **yt-dlp mode** for YouTube, Vimeo and many other sites: choose quality (best / 1080p / … / audio-only MP3),
   H.264/AAC MP4 output, subtitles. The browser button falls back to it when a page has no plain file or HLS stream
+- **Folders at a click** — an *Open Folder* toolbar button, and double-clicking *Video*, *Music*, … in the left list
+  opens that folder
+- **Browser extension helper** — *Browser* in the toolbar (or Settings) guides you through adding the extension to
+  Firefox or Chrome and registering the connector
 - **Adjustable text size** — *Settings → Text size* (live preview), or `Ctrl +` / `Ctrl -` / `Ctrl 0` in the main window
 - Tray icon, completion notifications, pure Python + Qt (PySide6) — no aria2 or other daemons needed
 

@@ -11,18 +11,19 @@ from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, 
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence,
                            QPainter, QPalette, QShortcut)
 from PySide6.QtWidgets import (
-    QAbstractItemView, QApplication, QComboBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
+    QAbstractItemView, QApplication, QComboBox, QGroupBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
 from . import __version__
-from . import ytdlp
+from . import browsers, ytdlp
 from .engine import probe
 from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
-from .util import default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed, sanitize_filename
+from .util import (category_folder, default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed,
+                   sanitize_filename)
 
 _PEEK_SLOTS = threading.Semaphore(3)
 
@@ -436,6 +437,158 @@ class AddDialog(QDialog):
             self.name.setText(res.filename)
 
 
+class ExtensionDialog(QDialog):
+    """Help for adding the Warpdown extension to Firefox / Chrome and registering the browser connector."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Browser extension")
+        self.setMinimumWidth(int(580 * font_scale()))
+        lay = QVBoxLayout(self)
+        intro = QLabel("The browser extension takes over your browser's downloads and adds a <b>Download this "
+                       "video</b> button to web videos. It talks to Warpdown through a small connector that has to "
+                       "be registered once.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.status = QLabel()
+        self.status.setWordWrap(True)
+        lay.addWidget(self.status)
+
+        # ---- Firefox ----
+        ff = QGroupBox("Firefox")
+        fl = QVBoxLayout(ff)
+        steps = QLabel("1. Press <b>Open Firefox add-on page</b>.<br>"
+                       "2. There, press <b>Load Temporary Add-on…</b> and choose <b>warpdown.xpi</b> "
+                       "(<i>Show extension file</i> opens its folder).<br>"
+                       "3. Click the Warpdown toolbar icon and press <b>Grant access</b>.<br>"
+                       "<small>Until the add-on is published on addons.mozilla.org, Firefox forgets temporary "
+                       "add-ons when it restarts.</small>")
+        steps.setWordWrap(True)
+        fl.addWidget(steps)
+        row = QHBoxLayout()
+        self.btn_ff = QPushButton("Open Firefox add-on page")
+        self.btn_ff.clicked.connect(self._open_firefox)
+        self.btn_xpi = QPushButton("Show extension file")
+        self.btn_xpi.clicked.connect(self._show_xpi)
+        row.addWidget(self.btn_ff); row.addWidget(self.btn_xpi)
+        if browsers.FIREFOX_ADDON_URL:
+            b = QPushButton("Install from addons.mozilla.org")
+            b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(browsers.FIREFOX_ADDON_URL)))
+            row.addWidget(b)
+        row.addStretch(1)
+        fl.addLayout(row)
+        lay.addWidget(ff)
+
+        # ---- Chrome / Chromium / Brave ----
+        ch = QGroupBox("Chrome, Chromium, Brave")
+        cl = QVBoxLayout(ch)
+        csteps = QLabel("1. Press <b>Open extensions page</b> and turn on <i>Developer mode</i>.<br>"
+                        "2. Press <b>Load unpacked</b> and choose the folder (<i>Show extension folder</i>).<br>"
+                        "3. Copy the extension's <b>ID</b> from that page, paste it below and press "
+                        "<b>Register</b>.")
+        csteps.setWordWrap(True)
+        cl.addWidget(csteps)
+        row = QHBoxLayout()
+        self.btn_ch = QPushButton("Open extensions page")
+        self.btn_ch.clicked.connect(self._open_chrome)
+        self.btn_dir = QPushButton("Show extension folder")
+        self.btn_dir.clicked.connect(self._show_folder)
+        row.addWidget(self.btn_ch); row.addWidget(self.btn_dir)
+        if browsers.CHROME_STORE_URL:
+            b = QPushButton("Install from Chrome Web Store")
+            b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(browsers.CHROME_STORE_URL)))
+            row.addWidget(b)
+        row.addStretch(1)
+        cl.addLayout(row)
+        row = QHBoxLayout()
+        self.chrome_id = QLineEdit()
+        self.chrome_id.setPlaceholderText("Extension ID, e.g. abcdefghijklmnopabcdefghijklmnop")
+        self.btn_reg = QPushButton("Register")
+        self.btn_reg.clicked.connect(self._register_chrome)
+        row.addWidget(self.chrome_id, 1); row.addWidget(self.btn_reg)
+        cl.addLayout(row)
+        lay.addWidget(ch)
+
+        self.result = QLabel("")
+        self.result.setWordWrap(True)
+        self.result.setTextInteractionFlags(Qt.TextSelectableByMouse)
+        lay.addWidget(self.result)
+        bottom = QHBoxLayout()
+        self.btn_fix = QPushButton("Install / repair connector")
+        self.btn_fix.setToolTip("Registers Warpdown's browser connector for Firefox and any Chrome-family browser "
+                                "that already has the ID saved.")
+        self.btn_fix.clicked.connect(lambda: self._run_installer(""))
+        proj = QPushButton("Project page")
+        proj.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(browsers.PROJECT_URL)))
+        close = QPushButton("Close")
+        close.clicked.connect(self.accept)
+        bottom.addWidget(self.btn_fix); bottom.addWidget(proj); bottom.addStretch(1); bottom.addWidget(close)
+        lay.addLayout(bottom)
+
+        have_ext = browsers.extension_dir() is not None
+        for b in (self.btn_xpi, self.btn_dir):
+            b.setEnabled(have_ext)
+        self.btn_reg.setEnabled(browsers.installer_script() is not None)
+        self.btn_fix.setEnabled(browsers.installer_script() is not None)
+        if not have_ext:
+            self.result.setText("The extension files aren't part of this installation. Download them from the "
+                                "project page.")
+        self._refresh_status()
+        # word-wrapped labels need more height at a given width: size the dialog for that, or lines get clipped
+        w = self.minimumWidth()
+        self.resize(w, lay.totalHeightForWidth(w))
+
+    def _refresh_status(self) -> None:
+        parts = [f"{name} {'✓' if ok else '✗'}" for name, ok in browsers.registration_status()]
+        self.status.setText("<b>Connector registered:</b> " + "   ".join(parts))
+
+    def _say(self, text: str) -> None:
+        self.result.setText(text)
+
+    def _open_firefox(self) -> None:
+        cmd = browsers.firefox_command()
+        if cmd is None:
+            return self._say("Firefox wasn't found on this computer.")
+        ok = browsers.open_in_browser(cmd, "about:debugging#/runtime/this-firefox")
+        self._say("Opened Firefox's add-on page." if ok else "Couldn't start Firefox.")
+
+    def _open_chrome(self) -> None:
+        cmd = browsers.chromium_command()
+        if cmd is None:
+            return self._say("No Chrome, Chromium or Brave was found on this computer.")
+        ok = browsers.open_in_browser(cmd, "chrome://extensions")
+        self._say("Opened the browser's extensions page." if ok else "Couldn't start the browser.")
+
+    def _show_xpi(self) -> None:
+        xpi = browsers.build_xpi()
+        if xpi is None:
+            return self._say("Couldn't create warpdown.xpi.")
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(xpi.parent)))
+        self._say(f"Extension file: {xpi}")
+
+    def _show_folder(self) -> None:
+        d = browsers.extension_dir()
+        if d is not None:
+            QDesktopServices.openUrl(QUrl.fromLocalFile(str(d)))
+            self._say(f"Extension folder: {d}")
+
+    def _register_chrome(self) -> None:
+        cid = self.chrome_id.text().strip()
+        if len(cid) != 32 or not cid.isalpha() or not cid.islower():
+            return self._say("That doesn't look like an extension ID (32 lowercase letters). Copy it from the "
+                             "browser's extensions page.")
+        self._run_installer(cid)
+
+    def _run_installer(self, chrome_id: str) -> None:
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            ok, out = browsers.run_installer(chrome_id)
+        finally:
+            QApplication.restoreOverrideCursor()
+        self._say(("Done. " if ok else "Failed: ") + out)
+        self._refresh_status()
+
+
 class SettingsDialog(QDialog):
     yt_updated = Signal(bool, str)
     font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
@@ -480,6 +633,9 @@ class SettingsDialog(QDialog):
         yrow.addWidget(self.ytlabel, 1)
         yrow.addWidget(self.ytbtn)
         form.addRow("Video sites:", yrow)
+        extbtn = QPushButton("Set up browser extension…")
+        extbtn.clicked.connect(lambda: ExtensionDialog(self).exec())
+        form.addRow("Browser:", extbtn)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
         form.addRow(bb)
@@ -534,6 +690,8 @@ class MainWindow(QMainWindow):
         self.cats.setCurrentRow(0)
         self.cats.setMaximumWidth(180)
         self.cats.currentTextChanged.connect(self._filter)
+        self.cats.itemDoubleClicked.connect(self.open_category_folder)
+        self.cats.setToolTip("Double-click an entry to open its folder")
         split = QSplitter()
         split.addWidget(self.cats)
         split.addWidget(self.table)
@@ -554,6 +712,13 @@ class MainWindow(QMainWindow):
                   lambda: self._each(mgr.pause))
         self._act(tb, "Delete", QIcon.fromTheme("edit-delete", st.standardIcon(QStyle.SP_TrashIcon)),
                   self.delete_selected, "Del")
+        tb.addSeparator()
+        a = self._act(tb, "Open Folder", QIcon.fromTheme("folder-open", st.standardIcon(QStyle.SP_DirOpenIcon)),
+                      self.open_folder)
+        a.setToolTip("Open the folder of the selected download (or the main downloads folder)")
+        a = self._act(tb, "Browser", QIcon.fromTheme("preferences-plugin", st.standardIcon(QStyle.SP_ComputerIcon)),
+                      self.extension_dialog)
+        a.setToolTip("Add the Warpdown extension to Firefox or Chrome")
         tb.addSeparator()
         self._act(tb, "Settings", QIcon.fromTheme("configure", st.standardIcon(QStyle.SP_FileDialogDetailedView)),
                   self.settings_dialog)
@@ -580,6 +745,38 @@ class MainWindow(QMainWindow):
         self.tray.show()
         mgr.changed.connect(self._notify_done)
         self._notified: set[str] = set()
+
+    # ---- folders & browser extension ----
+    def download_root(self) -> Path:
+        return Path(str(QSettings().value("download_dir", str(default_download_dir()))))
+
+    def open_folder(self) -> None:
+        """Toolbar: the selected download's folder, else the main downloads folder."""
+        path = None
+        ids = self._selected_ids()
+        if ids and ids[0] in self.mgr.items:
+            path = Path(self.mgr.items[ids[0]].directory)
+        if path is None or not path.is_dir():
+            path = self.download_root()
+            path.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(path)))
+
+    def open_category_folder(self, item) -> None:
+        """Double-click on the left-hand list: open that category's folder (Unfinished/Finished aren't folders)."""
+        name = item.text()
+        folder = category_folder(self.download_root(), name)
+        if folder is None:
+            self.status.showMessage(f"“{name}” is a filter, not a folder", 3000)
+            return
+        if not folder.is_dir():
+            if name != "All Downloads":
+                self.status.showMessage(f"No {name} folder yet — it is created with the first download", 4000)
+                return
+            folder.mkdir(parents=True, exist_ok=True)
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def extension_dialog(self) -> None:
+        ExtensionDialog(self).exec()
 
     def rescale(self) -> None:
         """Make columns, row height and toolbar icons follow the current text size."""
