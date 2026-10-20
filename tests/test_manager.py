@@ -57,13 +57,13 @@ def test_extension_guessing_and_sorting(qapp, tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
     srv, url = make_server(mp4 + os.urandom(2 * 1024 * 1024))
     m = DownloadManager()
-    it = m.add(url, str(tmp_path), filename="Echovideo - Some Title : Episode 1")
+    it = m.add(url, str(tmp_path), filename="Example Site - Some Title : Episode 1")
     t0 = time.time()
     while it.status != COMPLETED and time.time() - t0 < 30:
         qapp.processEvents()
         time.sleep(0.05)
     assert it.status == COMPLETED, (it.status, it.error)
-    assert (tmp_path / "Video" / "Echovideo - Some Title : Episode 1.mp4").exists()
+    assert (tmp_path / "Video" / "Example Site - Some Title : Episode 1.mp4").exists()
     m.shutdown()
     srv.shutdown()
 
