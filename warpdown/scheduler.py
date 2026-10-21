@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
+from .osutil import IS_WINDOWS
+
 DAY_NAMES = ("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun")        # index = datetime.weekday()
 AFTER_NOTHING, AFTER_QUIT, AFTER_SLEEP, AFTER_POWEROFF = "nothing", "quit", "sleep", "poweroff"
 AFTER_LABELS = {AFTER_NOTHING: "Do nothing", AFTER_QUIT: "Quit Warpdown", AFTER_SLEEP: "Put the computer to sleep",
@@ -13,6 +15,9 @@ AFTER_LABELS = {AFTER_NOTHING: "Do nothing", AFTER_QUIT: "Quit Warpdown", AFTER_
 
 def power_command(action: str) -> list[str] | None:
     """The command that carries out a 'when finished' action, or None if Warpdown handles it itself."""
+    if IS_WINDOWS:
+        return {AFTER_SLEEP: ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
+                AFTER_POWEROFF: ["shutdown", "/s", "/t", "0"]}.get(action)
     return {AFTER_SLEEP: ["systemctl", "suspend"], AFTER_POWEROFF: ["systemctl", "poweroff"]}.get(action)
 
 

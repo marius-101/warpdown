@@ -126,3 +126,25 @@ def test_messages_reach_a_handler_in_the_gui_thread_even_if_it_opens_a_nested_ev
         qapp.processEvents(); time.sleep(0.01)
     srv.close()
     assert sorted(handled) == ["http://x/0", "http://x/1", "http://x/2"] and set(threads) == {main}
+
+
+def test_tcp_transport_used_on_windows_needs_the_token(tmp_path, monkeypatch):
+    monkeypatch.setattr(ipc, "USE_TCP", True)
+    p = str(tmp_path / "ipc.json")
+    monkeypatch.setattr(ipc, "socket_path", lambda: p)
+    q = queue.SimpleQueue()
+    server = ipc.IpcServer(q)
+    assert server.listen()
+    try:
+        assert ipc.send({"action": "add", "url": "http://x/a"})
+        assert collect(q, 1) == [("ipc", ({"action": "add", "url": "http://x/a"},))]
+        info = __import__("json").load(open(p))
+        raw = socket.create_connection(("127.0.0.1", info["port"]))     # a stranger without the token
+        raw.sendall(b'{"action": "add", "url": "http://evil/x"}\n')
+        raw.close()
+        assert ipc.send({"action": "show"})
+        assert collect(q, 2, timeout=1.5) == [("ipc", ({"action": "show"},))]
+        assert not ipc.IpcServer(queue.SimpleQueue()).listen()          # a second instance is refused
+    finally:
+        server.close()
+    assert not os.path.exists(p)

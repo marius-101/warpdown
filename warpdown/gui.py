@@ -226,7 +226,7 @@ class Model(QAbstractTableModel):
         return None
 
 
-from . import torrent
+from . import osutil, torrent
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -647,7 +647,7 @@ class LinksDialog(QDialog):
 
 def run_power_command(cmd: list[str]) -> None:
     """Sleep / shut down the computer (a function of its own so tests can replace it)."""
-    subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.detached())
 
 
 class BatchDialog(QDialog):
@@ -946,8 +946,8 @@ class ExtensionDialog(QDialog):
         have_ext = browsers.extension_dir() is not None
         for b in (self.btn_xpi, self.btn_dir):
             b.setEnabled(have_ext)
-        self.btn_reg.setEnabled(browsers.installer_script() is not None)
-        self.btn_fix.setEnabled(browsers.installer_script() is not None)
+        self.btn_reg.setEnabled(browsers.can_register())
+        self.btn_fix.setEnabled(browsers.can_register())
         if not have_ext:
             self.result.setText("The extension files aren't part of this installation. Download them from the "
                                 "project page.")

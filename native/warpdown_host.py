@@ -7,7 +7,8 @@ import subprocess
 import sys
 import time
 
-from warpdown import ipc
+from warpdown import ipc, osutil
+from warpdown.util import data_dir
 
 
 def read_message():
@@ -25,9 +26,7 @@ def write_message(obj):
 
 
 def log(text):
-    d = os.path.join(os.environ.get("XDG_DATA_HOME", os.path.expanduser("~/.local/share")), "warpdown")
-    os.makedirs(d, exist_ok=True)
-    with open(os.path.join(d, "host.log"), "a") as f:
+    with open(os.path.join(str(data_dir()), "host.log"), "a") as f:
         f.write(f"{time.strftime('%H:%M:%S')} {text}\n")
 
 
@@ -43,8 +42,9 @@ def main():
             continue
         ok = ipc.send(msg)
         if not ok:
-            subprocess.Popen([sys.executable, "-m", "warpdown"], start_new_session=True,
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            app = osutil.helper("warpdown")                      # the installed Windows program, or Python from source
+            subprocess.Popen([app] if app else [sys.executable, "-m", "warpdown"],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.detached())
             for _ in range(30):
                 time.sleep(0.3)
                 if ipc.send(msg):

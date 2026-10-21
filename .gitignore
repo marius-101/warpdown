@@ -4,3 +4,5 @@ __pycache__/
 .pytest_cache/
 native/warpdown-host
 dist/
+build/
+warpdown/assets/warpdown.ico

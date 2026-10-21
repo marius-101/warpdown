@@ -9,6 +9,8 @@ import subprocess
 import zipfile
 from pathlib import Path
 
+from . import osutil
+from .osutil import IS_WINDOWS
 from .util import data_dir
 
 PROJECT_URL = "https://github.com/marius-101/warpdown"
@@ -27,12 +29,16 @@ CHROMIUM_CONFIG_DIRS = ("google-chrome", "chromium", "BraveSoftware/Brave-Browse
 
 
 def project_root() -> Path:
-    return Path(__file__).resolve().parent.parent
+    return osutil.app_dir()
 
 
 def extension_dir() -> Path | None:
     p = project_root() / "extension"
     return p if (p / "manifest.json").exists() else None
+
+
+def can_register() -> bool:
+    return IS_WINDOWS or installer_script() is not None
 
 
 def installer_script() -> Path | None:
@@ -85,7 +91,19 @@ def _is_snap_stub(path: str) -> bool:
         return False
 
 
+def _windows_program(*relative: str) -> str | None:
+    for var in ("ProgramFiles", "ProgramFiles(x86)", "LOCALAPPDATA"):
+        base = os.environ.get(var)
+        for rel in relative:
+            if base and (Path(base) / rel).is_file():
+                return str(Path(base) / rel)
+    return None
+
+
 def firefox_command() -> list[str] | None:
+    if IS_WINDOWS:
+        p = shutil.which("firefox") or _windows_program("Mozilla Firefox/firefox.exe")
+        return [p] if p else None
     if (Path.home() / ".var" / "app" / FLATPAK_FIREFOX).exists() and shutil.which("flatpak"):
         return ["flatpak", "run", FLATPAK_FIREFOX]
     p = shutil.which("firefox")
@@ -93,6 +111,10 @@ def firefox_command() -> list[str] | None:
 
 
 def chromium_command() -> list[str] | None:
+    if IS_WINDOWS:
+        p = _windows_program("Google/Chrome/Application/chrome.exe", "Microsoft/Edge/Application/msedge.exe",
+                             "BraveSoftware/Brave-Browser/Application/brave.exe")
+        return [p] if p else None
     for name in NATIVE_CHROMIUM_FAMILY:
         p = shutil.which(name)
         if p:
@@ -106,14 +128,79 @@ def chromium_command() -> list[str] | None:
 
 def open_in_browser(cmd: list[str], url: str) -> bool:
     try:
-        subprocess.Popen([*cmd, url], start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        subprocess.Popen([*cmd, url], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.detached())
         return True
     except OSError:
         return False
 
 
+# ---- Windows: browsers find the native host through registry keys that point at a manifest file ----
+WINDOWS_KEYS = {"Firefox": r"Software\Mozilla\NativeMessagingHosts",
+                "Chrome": r"Software\Google\Chrome\NativeMessagingHosts",
+                "Edge": r"Software\Microsoft\Edge\NativeMessagingHosts",
+                "Brave": r"Software\BraveSoftware\Brave-Browser\NativeMessagingHosts"}
+FF_IDS = ["warpdown@marius-101.github.io", "warpdown@warpdown.local"]
+
+
+def host_executable() -> str:
+    exe = osutil.helper("warpdown-host")
+    if exe:
+        return exe
+    wrapper = data_dir() / "native" / "warpdown-host.cmd"          # running from source on Windows
+    wrapper.parent.mkdir(exist_ok=True)
+    import sys
+    wrapper.write_text(f'@echo off\r\nset PYTHONPATH={project_root()}\r\n"{sys.executable}" '
+                       f'"{project_root() / "native" / "warpdown_host.py"}"\r\n')
+    return str(wrapper)
+
+
+def register_windows(chrome_extension_id: str = "") -> tuple[bool, str]:
+    """Write the host manifests and the registry keys (current user only, no administrator rights needed)."""
+    import winreg
+    folder = data_dir() / "native"
+    folder.mkdir(exist_ok=True)
+    host = host_executable()
+    base = {"name": HOST_NAME, "description": "Warpdown native host", "path": host, "type": "stdio"}
+    ff = folder / f"{HOST_NAME}.firefox.json"
+    ff.write_text(json.dumps({**base, "allowed_extensions": FF_IDS}, indent=1))
+    done = ["Firefox"]
+    winreg.SetValue(winreg.HKEY_CURRENT_USER, WINDOWS_KEYS["Firefox"] + "\\" + HOST_NAME, winreg.REG_SZ, str(ff))
+    cid = chrome_extension_id.strip() or _saved_chrome_id()
+    if cid:
+        ch = folder / f"{HOST_NAME}.chrome.json"
+        ch.write_text(json.dumps({**base, "allowed_origins": [f"chrome-extension://{cid}/"]}, indent=1))
+        for name in ("Chrome", "Edge", "Brave"):
+            winreg.SetValue(winreg.HKEY_CURRENT_USER, WINDOWS_KEYS[name] + "\\" + HOST_NAME, winreg.REG_SZ, str(ch))
+            done.append(name)
+        (folder / "chrome_id.txt").write_text(cid)
+    return True, "Registered for: " + ", ".join(done)
+
+
+def _saved_chrome_id() -> str:
+    try:
+        return (data_dir() / "native" / "chrome_id.txt").read_text().strip()
+    except OSError:
+        return ""
+
+
+def _windows_status() -> list[tuple[str, bool]]:
+    import winreg
+    out = []
+    for name, key in WINDOWS_KEYS.items():
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, key + "\\" + HOST_NAME):
+                ok = True
+        except OSError:
+            ok = False
+        if ok or name == "Firefox":
+            out.append((name, ok))
+    return out
+
+
 def registration_status() -> list[tuple[str, bool]]:
     """Is the native-messaging host registered? One (label, registered) pair per browser family found."""
+    if IS_WINDOWS:
+        return _windows_status()
     home = Path.home()
     out = [("Firefox", (home / ".mozilla" / "native-messaging-hosts" / f"{HOST_NAME}.json").exists())]
     if (home / ".var" / "app" / FLATPAK_FIREFOX).exists():
@@ -129,6 +216,11 @@ def registration_status() -> list[tuple[str, bool]]:
 
 def run_installer(chrome_extension_id: str = "") -> tuple[bool, str]:
     """Run native/install.sh (registers the browser host). Only available when running from a source checkout."""
+    if IS_WINDOWS:
+        try:
+            return register_windows(chrome_extension_id)
+        except OSError as e:
+            return False, str(e)
     script = installer_script()
     if script is None:
         return False, "The installer script isn't bundled with this installation."

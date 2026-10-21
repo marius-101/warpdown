@@ -9,16 +9,34 @@ from email.message import Message
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
+from .osutil import IS_WINDOWS
+
+
+def _data_home() -> Path:
+    if "XDG_DATA_HOME" in os.environ:
+        return Path(os.environ["XDG_DATA_HOME"])
+    if IS_WINDOWS:
+        return Path(os.environ.get("LOCALAPPDATA") or Path.home() / "AppData" / "Local")
+    return Path.home() / ".local" / "share"
+
+
+def _config_home() -> Path:
+    if "XDG_CONFIG_HOME" in os.environ:
+        return Path(os.environ["XDG_CONFIG_HOME"])
+    if IS_WINDOWS:
+        return Path(os.environ.get("APPDATA") or Path.home() / "AppData" / "Roaming")
+    return Path.home() / ".config"
+
 
 def data_dir() -> Path:
-    base = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
+    base = _data_home()
     p = base / "warpdown"
     p.mkdir(parents=True, exist_ok=True)
     return p
 
 
 def config_dir() -> Path:
-    base = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    base = _config_home()
     p = base / "warpdown"
     p.mkdir(parents=True, exist_ok=True)
     return p
@@ -31,11 +49,14 @@ def default_download_dir() -> Path:
     return Path.home() / "Downloads"
 
 
+_WINDOWS_RESERVED = {"CON", "PRN", "AUX", "NUL", *(f"COM{i}" for i in range(1, 10)), *(f"LPT{i}" for i in range(1, 10))}
 _BAD = re.compile(r'[\x00-\x1f/\\:*?"<>|]')
 
 
 def sanitize_filename(name: str) -> str:
     name = _BAD.sub("_", name).strip().strip(".")
+    if IS_WINDOWS and name.split(".")[0].upper() in _WINDOWS_RESERVED:      # CON, NUL, COM1 ... cannot be file names
+        name = "_" + name
     return name[:200] or "download"
 
 
@@ -162,8 +183,7 @@ def migrate_legacy_data() -> list[str]:
     Copies (never moves), so the old folders stay as a backup. Does nothing if the new folders already exist.
     """
     done: list[str] = []
-    data_home = Path(os.environ.get("XDG_DATA_HOME", Path.home() / ".local" / "share"))
-    conf_home = Path(os.environ.get("XDG_CONFIG_HOME", Path.home() / ".config"))
+    data_home, conf_home = _data_home(), _config_home()
     old, new = data_home / "kudm", data_home / "warpdown"
     if old.is_dir() and not new.exists():
         shutil.copytree(old, new)

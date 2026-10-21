@@ -17,6 +17,7 @@ from urllib.parse import urljoin
 import httpx
 from cryptography.hazmat.primitives.ciphers import Cipher, algorithms, modes
 
+from . import osutil
 from .engine import SSL_CONTEXT, USER_AGENT, Job, RateLimiter
 
 
@@ -301,7 +302,7 @@ class HlsDownloader:
                 for f in inputs:
                     cmd += ["-i", str(f)]
                 cmd += ["-c", "copy", "-movflags", "+faststart", str(tmp_out)]
-                r = subprocess.run(cmd, capture_output=True, text=True)
+                r = subprocess.run(cmd, capture_output=True, text=True, **osutil.quiet())
                 if r.returncode != 0:
                     raise HlsError("ffmpeg failed: " + r.stderr.strip()[-200:])
                 tmp_out.replace(job.dest.with_suffix(".mp4"))

@@ -139,7 +139,7 @@ def test_main_window_scheduler_saves_and_applies(env, monkeypatch):
 
 # ---------------------------------------------------------------- when finished
 @pytest.mark.parametrize("action,expected", [
-    (sch.AFTER_NOTHING, None), (sch.AFTER_SLEEP, ["systemctl", "suspend"]), (sch.AFTER_POWEROFF, ["systemctl", "poweroff"])])
+    (sch.AFTER_NOTHING, None), (sch.AFTER_SLEEP, sch.power_command(sch.AFTER_SLEEP)), (sch.AFTER_POWEROFF, sch.power_command(sch.AFTER_POWEROFF))])
 def test_after_finished_actions_ask_first(env, monkeypatch, action, expected):
     w, m, tmp = env
     QSettings().setValue("after_action", action)

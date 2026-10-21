@@ -17,6 +17,7 @@ import urllib.request
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
+from . import osutil
 from .engine import RateLimiter
 
 INSTALL_HINT = ("Torrents need aria2. Install it with: sudo apt install aria2" if not sys.platform.startswith("win")
@@ -24,8 +25,7 @@ INSTALL_HINT = ("Torrents need aria2. Install it with: sudo apt install aria2" i
 
 
 def binary() -> str | None:
-    local = Path(__file__).resolve().parent.parent / ("aria2c.exe" if sys.platform.startswith("win") else "aria2c")
-    return shutil.which("aria2c") or (str(local) if local.exists() else None)
+    return osutil.helper("aria2c") or shutil.which("aria2c")
 
 
 def available() -> bool:
@@ -105,7 +105,8 @@ class Aria2Downloader:
                 "--rpc-listen-all=false", f"--dir={self.job.dest.parent}", "--seed-time=0", "--continue=true",
                 "--file-allocation=none", "--auto-file-renaming=false", "--console-log-level=error",
                 "--summary-interval=0", "--bt-save-metadata=false", "--follow-torrent=true"]
-        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace")
+        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
+                                      **osutil.quiet())
 
     def _rpc(self, method: str, *params):
         body = json.dumps({"jsonrpc": "2.0", "id": "w", "method": method,

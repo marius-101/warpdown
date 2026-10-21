@@ -10,7 +10,7 @@ from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 
 from .app_icon import app_icon
-from . import ipc
+from . import browsers, ipc, osutil
 from . import themes
 from .inbox import Inbox
 from .gui import MainWindow, apply_font, apply_settings, saved_font_size, saved_theme
@@ -58,6 +58,11 @@ def main(argv: list[str] | None = None) -> int:
     apply_font(saved_font_size())          # text size chosen in Settings (0 = system default)
     themes.apply_theme(*saved_theme())    # style + mode chosen in Settings
 
+    if osutil.IS_WINDOWS and osutil.FROZEN:           # keep the browser connector registered (cheap; current user only)
+        try:
+            browsers.register_windows()
+        except OSError:
+            pass
     mgr = DownloadManager()
     apply_settings(mgr)
     win = MainWindow(mgr)

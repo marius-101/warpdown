@@ -17,9 +17,15 @@ from glob import escape as glob_escape
 from pathlib import Path
 from urllib.parse import urlsplit
 
+from . import osutil
 from .engine import RateLimiter
 
-CMD = [sys.executable, "-m", "yt_dlp"]
+def _make_cmd() -> list[str]:
+    exe = osutil.helper("yt-dlp")                       # the installed Windows program ships yt-dlp.exe
+    return [exe] if exe else [sys.executable, "-m", "yt_dlp"]
+
+
+CMD = _make_cmd()
 
 # Hosts where we switch to yt-dlp automatically (the user can still untick it).
 VIDEO_HOSTS = ("youtube.com", "youtu.be", "youtube-nocookie.com", "vimeo.com", "dailymotion.com", "twitch.tv",
@@ -38,6 +44,8 @@ AUDIO_ONLY = "Audio only (MP3)"
 
 
 def available() -> bool:
+    if osutil.helper("yt-dlp"):
+        return True
     try:
         import yt_dlp  # noqa: F401
         return True
@@ -64,6 +72,13 @@ def js_runtime() -> str | None:
 
 
 def version() -> str:
+    exe = osutil.helper("yt-dlp")
+    if exe:
+        try:
+            r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30, **osutil.quiet())
+            return r.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
     try:
         from importlib.metadata import version as _v
         return _v("yt-dlp")
@@ -73,8 +88,9 @@ def version() -> str:
 
 def update() -> tuple[bool, str]:
     """pip-upgrade yt-dlp inside Warpdown's own environment (sites change often; old versions break)."""
-    r = subprocess.run([sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"],
-                       capture_output=True, text=True, timeout=300)
+    exe = osutil.helper("yt-dlp")
+    cmd = [exe, "-U"] if exe else [sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"]
+    r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, **osutil.quiet())
     out = (r.stdout if r.returncode == 0 else r.stderr).strip().splitlines()
     return r.returncode == 0, out[-1] if out else ""
 
@@ -98,6 +114,7 @@ def _common_args(headers: dict, url: str = "") -> list[str]:
 def fetch_info(url: str, headers: dict | None = None, timeout: float = 90) -> dict:
     """Title, duration, max height and subtitle tracks for the dialog. Raises RuntimeError with yt-dlp's message."""
     r = subprocess.run([*CMD, *_common_args(headers or {}, url), "--dump-single-json", "--skip-download", url],
+                       **osutil.quiet(),
                        capture_output=True, text=True, timeout=timeout)
     if r.returncode != 0:
         msg = [l for l in r.stderr.splitlines() if l.strip()]
@@ -208,7 +225,7 @@ class YtdlpDownloader:
         try:
             self.job.dest.parent.mkdir(parents=True, exist_ok=True)
             self._proc = subprocess.Popen(self._args(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                          bufsize=1, errors="replace")
+                                          bufsize=1, errors="replace", **osutil.quiet())
             for line in self._proc.stdout:
                 prog = parse_progress(line)
                 if prog:
