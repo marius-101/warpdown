@@ -33,7 +33,8 @@ def dispatch(win: MainWindow, msg: dict) -> None:
 
 def main(argv: list[str] | None = None) -> int:
     argv = sys.argv if argv is None else argv
-    urls = [a for a in argv[1:] if a.startswith(("http://", "https://", "ftp://"))]
+    urls = [a for a in argv[1:] if a.startswith(("http://", "https://", "ftp://", "magnet:"))
+            or (a.lower().endswith(".torrent") and os.path.isfile(a))]
 
     # Already running? Hand the URLs over (or just raise the window) and exit. No Qt needed for this.
     if ipc.send({"action": "add", "url": urls[0]} if urls else {"action": "show"}):

@@ -71,7 +71,7 @@ Comment=IDM-style download manager
 Exec=env PYTHONPATH=$ROOT $PY -m warpdown %u
 Icon=warpdown
 Categories=Network;FileTransfer;
-MimeType=x-scheme-handler/magnet;
+MimeType=x-scheme-handler/magnet;application/x-bittorrent;
 Terminal=false
 DESK
 echo "Installed. Firefox host registered; Chromium-family hosts need WARPDOWN_CHROME_EXTENSION_ID (see README)."

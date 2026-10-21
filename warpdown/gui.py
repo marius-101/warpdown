@@ -23,6 +23,8 @@ from PySide6.QtWidgets import (
 from . import __version__
 from . import batch, browsers, linkgrab, themes, ytdlp
 from .clipboard import ClipboardWatcher
+from .limits import LimitSchedule
+from .stats import Stats
 from .scheduler import (AFTER_LABELS, AFTER_NOTHING, AFTER_POWEROFF, AFTER_QUIT, AFTER_SLEEP, DAY_NAMES, Schedule,
                         power_command)
 from .inbox import Inbox
@@ -121,6 +123,7 @@ class Model(QAbstractTableModel):
         super().__init__()
         self.mgr = mgr
         self.filter = "All Downloads"
+        self.search = ""
         self.rows: list[str] = []
         self.rebuild()
         mgr.added.connect(lambda _: self.rebuild())
@@ -129,6 +132,11 @@ class Model(QAbstractTableModel):
         mgr.schedule_changed.connect(self._all_changed)
 
     def matches(self, it: Item) -> bool:
+        words = self.search.lower().split()
+        if words:
+            hay = f"{it.filename} {it.url} {it.category} {it.status} {it.error}".lower()
+            if not all(w in hay for w in words):
+                return False
         f = self.filter
         if f == "All Downloads":
             return True
@@ -140,8 +148,7 @@ class Model(QAbstractTableModel):
 
     def rebuild(self) -> None:
         self.beginResetModel()
-        self.rows = [i.id for i in sorted(self.mgr.items.values(), key=lambda i: -i.added)
-                     if self.matches(i)]
+        self.rows = [i.id for i in self.mgr.queue_order() if self.matches(i)]       # same order as the queue
         self.endResetModel()
 
     def _all_changed(self) -> None:
@@ -188,6 +195,8 @@ class Model(QAbstractTableModel):
                 if it.status == RETRYING:
                     left = max(0, int(it.retry_at - time.time()))
                     return f"Retrying in {fmt_eta(left) or '0s'} (attempt {it.retries}/{self.mgr.max_retries}) · {explain(it.error).short}"
+                if it.held and self.mgr.vpn_blocked:
+                    return "Paused: VPN is not connected"
                 if it.held:
                     return "Paused by the schedule"
                 if it.status == QUEUED and not self.mgr.gate_open:
@@ -195,7 +204,18 @@ class Model(QAbstractTableModel):
                 if it.error:
                     return f"{it.status}: {explain(it.error).short}"
                 n = len(it.sub_files)
-                return f"{it.status} · {n} subtitle{'s' if n != 1 else ''}" if n else it.status
+                text = f"{it.status} · {n} subtitle{'s' if n != 1 else ''}" if n else it.status
+                if it.status == DOWNLOADING and it.limit_kb:
+                    text += f" · limited to {it.limit_kb} KB/s"
+                if it.status in (QUEUED, PAUSED) and it.priority:
+                    text += " · high priority" if it.priority > 0 else " · low priority"
+                if it.verified == "checking":
+                    text += " · checking checksum…"
+                elif it.verified == "ok":
+                    text += f" · ✓ {it.verify_algo.upper()} verified"
+                elif it.verified == "bad":
+                    text += f" · ✗ {it.verify_algo.upper()} checksum does NOT match"
+                return text
             if c == 6:
                 from datetime import datetime
                 return datetime.fromtimestamp(it.added).strftime("%Y-%m-%d %H:%M")
@@ -206,6 +226,7 @@ class Model(QAbstractTableModel):
         return None
 
 
+from . import torrent
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -452,6 +473,9 @@ class AddDialog(QDialog):
 
     def _probe(self):
         u = self.url.text().strip()
+        if torrent.is_torrent_source(u):
+            self.info.setText(torrent.magnet_name(u) or ("Torrent" if torrent.available() else torrent.INSTALL_HINT))
+            return
         if not u.startswith(("http://", "https://")):
             return
         if not self._yt_user_set and ytdlp.available() and ytdlp.looks_like_video_site(u):
@@ -1012,6 +1036,21 @@ class SettingsDialog(QDialog):
         self.limit = QSpinBox(); self.limit.setRange(0, 1_000_000); self.limit.setSuffix(" KB/s")
         self.limit.setSpecialValueText("Unlimited")
         self.limit.setValue(int(s.value("speed_limit_kb", 0)))
+        self.lsched = QCheckBox("Use a different limit during these hours:")
+        self.lsched.setChecked(str(s.value("limit_sched_on", "false")).lower() == "true")
+        self.lkb = QSpinBox(); self.lkb.setRange(0, 1_000_000); self.lkb.setSuffix(" KB/s")
+        self.lkb.setSpecialValueText("Unlimited")
+        self.lkb.setValue(int(s.value("limit_sched_kb", 500)))
+        self.lfrom = QTimeEdit(QTime.fromString(str(s.value("limit_sched_from", "08:00")), "HH:mm"))
+        self.lto = QTimeEdit(QTime.fromString(str(s.value("limit_sched_to", "23:00")), "HH:mm"))
+        for t in (self.lfrom, self.lto):
+            t.setDisplayFormat("HH:mm")
+        self.vpn = QCheckBox("Pause all downloads while no VPN is connected")
+        self.vpn.setChecked(str(s.value("require_vpn", "false")).lower() == "true")
+        self.vpn.setToolTip("Looks for a VPN network connection (WireGuard, OpenVPN, ProtonVPN, Mullvad, Tailscale …). "
+                            "Downloads stop at once when it drops and continue when it is back.")
+        self.sums = QCheckBox("Look for a published checksum next to downloaded files and verify it")
+        self.sums.setChecked(str(s.value("find_checksums", "true")).lower() == "true")
         self.retry = QCheckBox("Retry failed downloads automatically (temporary network or server problems)")
         self.retry.setChecked(str(s.value("auto_retry", "true")).lower() == "true")
         self.retries = QSpinBox(); self.retries.setRange(1, 20)
@@ -1046,6 +1085,13 @@ class SettingsDialog(QDialog):
         form.addRow("Connections per download:", self.conns)
         form.addRow("Simultaneous downloads:", self.active)
         form.addRow("Speed limit:", self.limit)
+        lrow = QHBoxLayout()
+        for w in (self.lkb, QLabel("from"), self.lfrom, QLabel("to"), self.lto):
+            lrow.addWidget(w)
+        form.addRow("", self.lsched)
+        form.addRow("", lrow)
+        form.addRow("", self.vpn)
+        form.addRow("", self.sums)
         form.addRow("", self.retry)
         form.addRow("Maximum retries:", self.retries)
         form.addRow("", self.clip)
@@ -1090,6 +1136,69 @@ SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated, SettingsDialog._ope
     _settings_update_methods()
 
 
+class BarChart(QWidget):
+    """The last days as simple bars (drawn with the application palette, so it fits every theme)."""
+
+    def __init__(self, data: list, parent=None):
+        super().__init__(parent)
+        self.data = data
+        self.setMinimumHeight(150)
+
+    def paintEvent(self, _e):
+        pal = QApplication.palette()
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        w, h = self.width(), self.height() - 22
+        top = max((b for _d, b in self.data), default=0) or 1
+        n = max(len(self.data), 1)
+        slot = w / n
+        for i, (day, b) in enumerate(self.data):
+            bh = max(2.0, (h - 6) * b / top) if b else 2.0
+            r = QRectF(i * slot + slot * 0.18, h - bh, slot * 0.64, bh)
+            p.setPen(Qt.NoPen)
+            p.setBrush(pal.highlight() if b else pal.mid())
+            p.drawRoundedRect(r, 3, 3)
+            if i % 2 == 0 or n <= 8:
+                p.setPen(pal.windowText().color())
+                p.drawText(QRectF(i * slot, h + 4, slot, 16), Qt.AlignHCenter, str(day.day))
+        p.end()
+
+
+class StatsDialog(QDialog):
+    def __init__(self, parent, stats: Stats):
+        super().__init__(parent)
+        self.stats = stats
+        self.setWindowTitle("Statistics")
+        self.setMinimumWidth(520)
+        lay = QVBoxLayout(self)
+        files_total = stats.total()
+        grid = QFormLayout()
+        for label, n in (("Today", 1), ("Last 7 days", 7), ("Last 30 days", 30)):
+            b, f = stats.period(n)
+            grid.addRow(label + ":", QLabel(f"{fmt_size(b) or '0 B'} · {f} file{'s' if f != 1 else ''}"))
+        grid.addRow("In total:", QLabel(f"{fmt_size(files_total[0]) or '0 B'} · {files_total[1]} files"))
+        lay.addLayout(grid)
+        lay.addWidget(QLabel("<b>Last 14 days</b>"))
+        lay.addWidget(BarChart(stats.last_days(14)))
+        lay.addWidget(QLabel("<b>By type</b>"))
+        cats = QFormLayout()
+        for name, row in sorted(stats.cats.items(), key=lambda kv: -kv[1]["bytes"]):
+            cats.addRow(name + ":", QLabel(f"{fmt_size(row['bytes']) or '0 B'} · {row['files']} files"))
+        if not stats.cats:
+            cats.addRow(QLabel("Nothing yet: finished downloads are counted from now on."))
+        lay.addLayout(cats)
+        bb = QDialogButtonBox(QDialogButtonBox.Close)
+        reset = bb.addButton("Reset statistics", QDialogButtonBox.ResetRole)
+        reset.clicked.connect(self._reset)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+
+    def _reset(self):
+        if QMessageBox.question(self, "Statistics", "Delete all statistics? (Your downloads are not touched.)") == QMessageBox.Yes:
+            self.stats.reset()
+            self.accept()
+
+
 class MainWindow(QMainWindow):
     def __init__(self, mgr: DownloadManager):
         super().__init__()
@@ -1108,7 +1217,7 @@ class MainWindow(QMainWindow):
         h.setSectionResizeMode(QHeaderView.Interactive)
         h.setStretchLastSection(False)
         h.setSectionResizeMode(0, QHeaderView.Stretch)
-        self._base_widths = [300, 75, 140, 85, 65, 150, 125]
+        self._base_widths = [300, 75, 140, 85, 65, 250, 125]
         self.table.doubleClicked.connect(self._open_file)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -1120,9 +1229,18 @@ class MainWindow(QMainWindow):
         self.cats.currentTextChanged.connect(self._filter)
         self.cats.itemDoubleClicked.connect(self.open_category_folder)
         self.cats.setToolTip("Double-click an entry to open its folder")
+        self.search = QLineEdit()
+        self.search.setPlaceholderText("Search downloads…  (Ctrl+F)")
+        self.search.setClearButtonEnabled(True)
+        self.search.textChanged.connect(self._search)
+        right = QWidget()
+        rl = QVBoxLayout(right)
+        rl.setContentsMargins(0, 0, 0, 0)
+        rl.addWidget(self.search)
+        rl.addWidget(self.table, 1)
         split = QSplitter()
         split.addWidget(self.cats)
-        split.addWidget(self.table)
+        split.addWidget(right)
         split.setStretchFactor(0, 0)       # the list keeps its width when the window is resized...
         split.setStretchFactor(1, 1)       # ...and the table takes all the extra space
         self.split = split
@@ -1152,6 +1270,9 @@ class MainWindow(QMainWindow):
         a = self._act(tb, "Schedule", QIcon.fromTheme("chronometer", st.standardIcon(QStyle.SP_BrowserReload)),
                       self.scheduler_dialog, "Ctrl+Shift+S")
         a.setToolTip("Run downloads at night or at set times, and choose what happens when they are finished")
+        a = self._act(tb, "Statistics", QIcon.fromTheme("office-chart-bar", st.standardIcon(QStyle.SP_FileDialogInfoView)),
+                      self.stats_dialog)
+        a.setToolTip("How much you downloaded: today, this week, this month and in total")
         a = self._act(tb, "Browser", QIcon.fromTheme("preferences-plugin", st.standardIcon(QStyle.SP_ComputerIcon)),
                       self.extension_dialog)
         a.setToolTip("Add the Warpdown extension to Firefox or Chrome")
@@ -1192,10 +1313,14 @@ class MainWindow(QMainWindow):
         self.apply_clipboard_setting()
         mgr.queue_finished.connect(lambda: QTimer.singleShot(0, self._on_queue_finished))
         mgr.schedule_changed.connect(self._update_status)
+        mgr.vpn_changed.connect(self._on_vpn_changed)
+        for keys, where in (("Alt+Home", "top"), ("Alt+Up", "up"), ("Alt+Down", "down"), ("Alt+End", "bottom")):
+            QShortcut(QKeySequence(keys), self, activated=lambda w=where: self.mgr.move(self._selected_ids(), w))
+        QShortcut(QKeySequence.Find, self, activated=lambda: (self.search.setFocus(), self.search.selectAll()))
 
     # ---- themes & icons ----
     _TOOLBAR_KEYS = {"Add URL": "add", "Batch": "batch", "Schedule": "schedule", "Resume": "resume", "Pause": "pause", "Delete": "delete",
-                     "Open Folder": "folder", "Browser": "browser", "Settings": "settings"}
+                     "Open Folder": "folder", "Browser": "browser", "Settings": "settings", "Statistics": "stats"}
     _CATEGORY_KEYS = {"All Downloads": "all", "Unfinished": "unfinished", "Finished": "finished", "Video": "video",
                       "Music": "music", "Compressed": "compressed", "Documents": "documents",
                       "Programs": "programs", "Images": "images", "Other": "other"}
@@ -1415,6 +1540,48 @@ class MainWindow(QMainWindow):
         else:
             e.accept()
 
+    def _search(self, text):
+        self.model.search = text
+        self.model.rebuild()
+
+    def item_limit_dialog(self):
+        ids = self._selected_ids()
+        if not ids:
+            return
+        cur = self.mgr.items[ids[0]].limit_kb
+        kb, ok = QInputDialog.getInt(self, "Speed limit", "Limit for the selected download(s) in KB/s\n(0 = no extra limit):",
+                                     cur, 0, 1_000_000)
+        if ok:
+            for iid in ids:
+                self.mgr.set_item_limit(iid, kb)
+
+    def checksum_dialog(self):
+        ids = self._selected_ids()
+        if not ids:
+            return
+        it = self.mgr.items[ids[0]]
+        text, ok = QInputDialog.getText(self, "Verify checksum",
+                                        "Paste the checksum (SHA-256, SHA-1, SHA-512 or MD5) from the download page.\n"
+                                        "A finished file is checked now; an unfinished one when it completes.",
+                                        text=it.checksum)
+        if ok:
+            try:
+                self.mgr.set_checksum(it.id, text)
+            except ValueError as e:
+                QMessageBox.warning(self, "Checksum", str(e))
+
+    def stats_dialog(self):
+        d = StatsDialog(self, self.mgr.stats)
+        d.exec()
+        d.deleteLater()
+
+    def _on_vpn_changed(self, blocked: bool):
+        if blocked:
+            self.tray.showMessage("Warpdown", "VPN disconnected: downloads are paused until it is back.",
+                                  QSystemTrayIcon.Warning, 6000)
+        else:
+            self.tray.showMessage("Warpdown", "VPN connected: downloads continue.", QSystemTrayIcon.Information, 3000)
+
     def _filter(self, name):
         self.model.filter = name
         self.model.rebuild()
@@ -1431,7 +1598,7 @@ class MainWindow(QMainWindow):
                    mode: str = ""):
         if not url:
             clip = QGuiApplication.clipboard().text().strip()
-            url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
+            url = clip if clip.startswith(("http://", "https://", "magnet:")) and "\n" not in clip else ""
         d = AddDialog(self, url, headers or {}, use_ytdlp=(mode == "ytdlp"))
         try:
             d.set_subs(subs or [], headers or {})
@@ -1477,6 +1644,12 @@ class MainWindow(QMainWindow):
             s.setValue("connections", d.conns.value())
             s.setValue("speed_limit_kb", d.limit.value())
             s.setValue("max_active", d.active.value())
+            s.setValue("limit_sched_on", d.lsched.isChecked())
+            s.setValue("limit_sched_kb", d.lkb.value())
+            s.setValue("limit_sched_from", d.lfrom.time().toString("HH:mm"))
+            s.setValue("limit_sched_to", d.lto.time().toString("HH:mm"))
+            s.setValue("require_vpn", d.vpn.isChecked())
+            s.setValue("find_checksums", d.sums.isChecked())
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
             s.setValue("auto_retry", d.retry.isChecked())
@@ -1511,6 +1684,19 @@ class MainWindow(QMainWindow):
         m.addAction("Resume", lambda: self._each(self.mgr.resume))
         m.addAction("Pause", lambda: self._each(self.mgr.pause))
         m.addAction("Copy URL", lambda: (self.clip.remember(it.url), QGuiApplication.clipboard().setText(it.url)))
+        m.addSeparator()
+        q = m.addMenu("Queue position")
+        for label, where, key in (("Move to top", "top", "Alt+Home"), ("Move up", "up", "Alt+Up"),
+                                  ("Move down", "down", "Alt+Down"), ("Move to bottom", "bottom", "Alt+End")):
+            q.addAction(label, lambda w=where: self.mgr.move(self._selected_ids(), w)).setShortcut(key)
+        pr = m.addMenu("Priority")
+        for label, val in (("High", 1), ("Normal", 0), ("Low", -1)):
+            a = pr.addAction(label, lambda v=val: self._each(lambda i: self.mgr.set_priority(i, v)))
+            a.setCheckable(True)
+            a.setChecked(it.priority == val)
+        m.addAction("Speed limit for this download…", self.item_limit_dialog)
+        if it.kind in ("http", "hls", "ytdlp"):
+            m.addAction("Verify checksum…", self.checksum_dialog)
         if it.error:
             m.addAction("Copy error details", lambda: QGuiApplication.clipboard().setText(f"{it.error}\n{it.url}"))
         m.addSeparator()
@@ -1522,7 +1708,9 @@ class MainWindow(QMainWindow):
         active = [i for i in its if i.status == DOWNLOADING]
         total = sum(i.speed for i in active)
         sched = ""
-        if self.mgr.schedule.enabled:
+        if self.mgr.vpn_blocked:
+            sched = " · paused: VPN not connected"
+        elif self.mgr.schedule.enabled:
             sched = " · scheduler: " + ("running" if self.mgr.gate_open else "waiting")
         self.status.showMessage(f"{len(active)} active · {fmt_speed(total) or '0 B/s'} · {len(its)} total{sched}")
         if hasattr(self, "tray"):          # hovering the tray icon: name plus what is going on
@@ -1547,6 +1735,13 @@ def apply_settings(mgr: DownloadManager) -> None:
         except OSError:
             pass
     mgr.set_speed_limit(int(s.value("speed_limit_kb", 0)) * 1024)
+    mgr.set_limit_schedule(LimitSchedule(str(s.value("limit_sched_on", "false")).lower() == "true",
+                                         int(s.value("limit_sched_kb", 500)), str(s.value("limit_sched_from", "08:00")),
+                                         str(s.value("limit_sched_to", "23:00"))))
+    mgr.find_published_checksums = str(s.value("find_checksums", "true")).lower() == "true"
+    want_vpn = str(s.value("require_vpn", "false")).lower() == "true"
+    if want_vpn != mgr.require_vpn:
+        mgr.set_require_vpn(want_vpn)
     mgr.auto_retry = str(s.value("auto_retry", "true")).lower() == "true"
     mgr.max_retries = int(s.value("max_retries", 5))
     sched = Schedule.from_settings({k: s.value(k) for k in ("sched_enabled", "sched_start", "sched_stop", "sched_days")

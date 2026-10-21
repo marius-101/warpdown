@@ -75,7 +75,7 @@ def test_open_folder_button_uses_selection_else_root(win):
 
 def test_toolbar_order_settings_last(win):
     names = [a.text() for a in win.toolbar.actions() if a.text()]
-    assert names == ["Add URL", "Batch", "Resume", "Pause", "Delete", "Open Folder", "Schedule", "Browser", "Settings"]
+    assert names == ["Add URL", "Batch", "Resume", "Pause", "Delete", "Open Folder", "Schedule", "Statistics", "Browser", "Settings"]
 
 
 # ---------------- browser helpers ----------------

@@ -246,6 +246,10 @@ _ICONS = {
         '<path d="M3 6.7a2.2 2.2 0 0 1 2.2-2.2h13.6A2.2 2.2 0 0 1 21 6.7V10H3z" fill="#da4453"/>'
         '<path d="M8 3v3M16 3v3" stroke="#a8303c" stroke-width="1.8" stroke-linecap="round"/>'
         '<path d="M12 12.5v3.2l2.2 1.2" stroke="#3daee9" stroke-width="1.8" stroke-linecap="round" fill="none"/>'),
+    "stats": (
+        '<path d="M5 20V11M12 20V5M19 20v-7"/><path d="M3 20.5h18"/>',
+        '<rect x="3.5" y="12" width="4.5" height="8" rx="1" fill="#3daee9"/><rect x="9.8" y="5" width="4.5" height="15" rx="1" fill="#27ae60"/>'
+        '<rect x="16" y="9" width="4.5" height="11" rx="1" fill="#f67400"/>'),
     "images": (
         '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4.5 4.5"/>',
         '<rect x="2.5" y="4" width="19" height="16" rx="2.2" fill="#27ae60"/><circle cx="8" cy="9" r="2" fill="#fcd34d"/>'

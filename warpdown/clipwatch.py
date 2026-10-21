@@ -37,5 +37,9 @@ def is_downloadable(url: str) -> bool:
     return bool(ytdlp.looks_like_video_site(url) and (parts.path.strip("/") or parts.query))
 
 
+_MAGNET = re.compile(r"magnet:\?[^\s<>\"'`]+", re.I)
+
+
 def pick(text: str) -> list[str]:
-    return [u for u in extract_urls(text) if is_downloadable(u)]
+    magnets = list(dict.fromkeys(m for m in _MAGNET.findall(text or "") if "xt=urn:btih:" in m.lower()))
+    return magnets + [u for u in extract_urls(text) if is_downloadable(u)]

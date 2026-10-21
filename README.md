@@ -19,7 +19,24 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
   chance to cancel)
 - **Clipboard watcher** (off by default) — copy a link to a file or video and Warpdown offers to download it; on KDE
   it reads Klipper over D-Bus, so it also works under Wayland while Warpdown sits in the tray
-- **Queue** with a configurable number of simultaneous downloads and a global speed limit
+- **Queue** with a configurable number of simultaneous downloads. Reorder it (*right-click → Queue position*, or
+  `Alt+Up` / `Alt+Down` / `Alt+Home` / `Alt+End`) and set a **priority** (high / normal / low): the list is shown in
+  the order downloads start
+- **Speed limits** — a global limit, an optional *different limit during chosen hours* (e.g. slow by day, unlimited at
+  night), and a limit for single downloads (*right-click → Speed limit for this download…*)
+- **Checksum verification** — paste a SHA-256 / SHA-512 / SHA-1 / MD5 checksum (*right-click → Verify checksum…*) and
+  get a ✓ or ✗; Warpdown also looks for a published `NAME.sha256` (etc.) next to a downloaded file and checks it
+  automatically (can be turned off in Settings)
+- **Torrents and magnet links** — `magnet:` links, `.torrent` addresses and `.torrent` files, downloaded with
+  [aria2](https://aria2.github.io) (`sudo apt install aria2`; on Windows put `aria2c.exe` next to Warpdown or in your
+  PATH). Warpdown registers as the handler for magnet links and does not seed after finishing
+- **VPN guard** — *Settings → Pause all downloads while no VPN is connected*: downloads stop as soon as the VPN drops
+  and continue when it is back. It looks for a VPN network interface (WireGuard, OpenVPN, ProtonVPN, Mullvad,
+  Tailscale, …); it is a convenience, not a firewall kill-switch
+- **Search** the list (`Ctrl+F`) and **statistics** (*Statistics* in the toolbar): downloaded today, this week, this
+  month and in total, a 14-day chart, and a breakdown by file type
+- **Plain-language errors** — a failed download says what went wrong and what to try; the technical text is in the
+  tooltip and *Copy error details*
 - **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Images, Other — created automatically;
   files are sorted into them (file types are recognised from the name, `Content-Type` or the file's first bytes)
 - **Browser integration** (Firefox and Chromium family): takes over browser downloads, a "Download with Warpdown"
