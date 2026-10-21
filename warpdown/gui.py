@@ -187,13 +187,13 @@ class Model(QAbstractTableModel):
             if c == 5:
                 if it.status == RETRYING:
                     left = max(0, int(it.retry_at - time.time()))
-                    return f"Retrying in {fmt_eta(left) or '0s'} (attempt {it.retries}/{self.mgr.max_retries}) · {it.error[:40]}"
+                    return f"Retrying in {fmt_eta(left) or '0s'} (attempt {it.retries}/{self.mgr.max_retries}) · {explain(it.error).short}"
                 if it.held:
                     return "Paused by the schedule"
                 if it.status == QUEUED and not self.mgr.gate_open:
                     return "Scheduled (waiting)"
                 if it.error:
-                    return f"{it.status}: {it.error}"
+                    return f"{it.status}: {explain(it.error).short}"
                 n = len(it.sub_files)
                 return f"{it.status} · {n} subtitle{'s' if n != 1 else ''}" if n else it.status
             if c == 6:
@@ -202,8 +202,11 @@ class Model(QAbstractTableModel):
         if role == Qt.UserRole and c == 2:
             return int(it.progress * 1000)
         if role == Qt.ToolTipRole:
-            return it.url
+            return error_tooltip(it.error, it.url) if (c == 5 and it.error) else it.url
         return None
+
+
+from .errors import explain, tooltip as error_tooltip
 
 
 class ProgressDelegate(QStyledItemDelegate):
@@ -1506,6 +1509,8 @@ class MainWindow(QMainWindow):
         m.addAction("Resume", lambda: self._each(self.mgr.resume))
         m.addAction("Pause", lambda: self._each(self.mgr.pause))
         m.addAction("Copy URL", lambda: (self.clip.remember(it.url), QGuiApplication.clipboard().setText(it.url)))
+        if it.error:
+            m.addAction("Copy error details", lambda: QGuiApplication.clipboard().setText(f"{it.error}\n{it.url}"))
         m.addSeparator()
         m.addAction("Delete…", self.delete_selected)
         m.exec(self.table.viewport().mapToGlobal(pos))

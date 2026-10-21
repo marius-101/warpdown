@@ -41,7 +41,7 @@ def test_status_column_explains_waiting_states(env):
     col = 5
     status = lambda: w.model.data(w.model.index(0, col), Qt.DisplayRole)
     m._fail(a, "Server error '503 Service Unavailable'")
-    assert status().startswith("Retrying in") and "(attempt 1/5)" in status() and "503" in status()
+    assert status().startswith("Retrying in") and "(attempt 1/5)" in status() and "server had a problem" in status()
     a.status, a.error, a.held = PAUSED, "", True
     assert status() == "Paused by the schedule"
     a.held, a.status = False, QUEUED

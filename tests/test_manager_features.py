@@ -215,3 +215,12 @@ def test_configuring_a_trigger_schedule_does_not_catch_up_on_past_start_times(m)
     m._last_check = D(2026, 10, 20, 0, 0)                                 # app "idle" for a day
     m._update_gate(D(2026, 10, 21, 12, 0), force=True)
     assert not m.gate_open                                                # 02:00 yesterday and today are in the past
+
+
+def test_error_explanations():
+    from warpdown.errors import explain
+    assert "refused" in explain("Unable to download webpage: HTTP Error 403: Forbidden").short
+    assert "No downloadable video" in explain("Unsupported URL: https://x/y").short
+    assert "disk is full" in explain("[Errno 28] No space left on device").short
+    assert explain("weird thing").short == "weird thing"
+    assert "403" in explain("HTTP Error 403: Forbidden").raw
