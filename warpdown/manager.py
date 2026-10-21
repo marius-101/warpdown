@@ -12,6 +12,7 @@ from pathlib import Path
 from PySide6.QtCore import QObject, QTimer, Signal
 
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
+from .inbox import Inbox
 from .hls import HlsDownloader
 from .subtitles import fetch_subtitle, matches_langs, tag_for
 from .ytdlp import YtdlpDownloader
@@ -54,13 +55,30 @@ class Item:
         return self.downloaded / self.size if self.size > 0 else 0.0
 
 
+# ---- background jobs: module-level, plain data + a queue only (see inbox.py for why) ----
+def _probe_job(q, iid: str, url: str, headers: dict) -> None:
+    try:
+        q.put(("probed", (iid, probe(url, headers), "")))
+    except Exception as e:  # noqa: BLE001
+        q.put(("probed", (iid, None, str(e) or e.__class__.__name__)))
+
+
+def _subtitle_job(q, iid: str, tracks: list, headers: dict, video) -> None:
+    saved = []
+    for t in tracks[:12]:
+        try:
+            p = fetch_subtitle(t["url"], headers, video, t.get("lang", ""), t.get("label", ""))
+            if p:
+                saved.append(str(p))
+        except Exception:  # noqa: BLE001  (a missing subtitle must never fail the video)
+            pass
+    q.put(("subs", (iid, saved)))
+
+
 class DownloadManager(QObject):
     changed = Signal(str)       # item id
     added = Signal(str)
     removed = Signal(str)
-    _finished = Signal(str, object)  # emitted from worker threads
-    _probed = Signal(str, object, str)
-    _subs_done = Signal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -72,9 +90,8 @@ class DownloadManager(QObject):
         self.sort_by_category = True
         self.sub_langs: list[str] = []   # wanted subtitle languages for auto-found tracks; [] = all
         self._file = data_dir() / "downloads.json"
-        self._finished.connect(self._on_finished)
-        self._probed.connect(self._on_probed)
-        self._subs_done.connect(self._on_subs_done)
+        # Worker threads talk to this object only through the inbox (plain data in a queue), never via Qt signals.
+        self._inbox = Inbox({"finished": self._on_finished, "probed": self._on_probed, "subs": self._on_subs_done}, self)
         self._load()
         self._timer = QTimer(self)
         self._timer.timeout.connect(self._tick)
@@ -188,13 +205,8 @@ class DownloadManager(QObject):
         it.status = PROBING
         self.changed.emit(it.id)
 
-        def work():
-            try:
-                res = probe(it.url, self._browser_headers(it))
-                self._probed.emit(it.id, res, "")
-            except Exception as e:  # noqa: BLE001
-                self._probed.emit(it.id, None, str(e) or e.__class__.__name__)
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=_probe_job, args=(self._inbox.queue, it.id, it.url, self._browser_headers(it)),
+                         daemon=True).start()
 
     @staticmethod
     def _browser_headers(it: Item) -> dict:
@@ -239,7 +251,7 @@ class DownloadManager(QObject):
     def _launch(self, it: Item) -> None:
         job = Job(it.url, it.path, it.size, it.resumable, it.connections, self._browser_headers(it), it.opts)
         cls = {"hls": HlsDownloader, "ytdlp": YtdlpDownloader}.get(it.kind, Downloader)
-        eng = cls(job, self.limiter, on_finish=lambda d, i=it.id: self._finished.emit(i, d))
+        eng = cls(job, self.limiter, on_finish=lambda d, i=it.id, q=self._inbox.queue: q.put(("finished", (i, d))))
         self.engines[it.id] = eng
         it.status = DOWNLOADING
         self.changed.emit(it.id)
@@ -281,19 +293,8 @@ class DownloadManager(QObject):
                 tracks.append(t)
         if not tracks:
             return
-        video, headers = it.path, self._browser_headers(it)
-
-        def work():
-            saved = []
-            for t in tracks[:12]:
-                try:
-                    p = fetch_subtitle(t["url"], headers, video, t.get("lang", ""), t.get("label", ""))
-                    if p:
-                        saved.append(str(p))
-                except Exception:  # noqa: BLE001  (a missing subtitle must never fail the video)
-                    pass
-            self._subs_done.emit(it.id, saved)
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=_subtitle_job, args=(self._inbox.queue, it.id, tracks, self._browser_headers(it), it.path),
+                         daemon=True).start()
 
     def _on_subs_done(self, iid: str, saved: list) -> None:
         it = self.items.get(iid)

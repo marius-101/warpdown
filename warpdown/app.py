@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import faulthandler
 import sys
 
 from PySide6.QtCore import QSettings, QTimer
@@ -11,7 +12,10 @@ from . import ipc
 from . import themes
 from .gui import MainWindow, apply_font, apply_settings, saved_font_size, saved_theme
 from .manager import DownloadManager
-from .util import default_download_dir, migrate_legacy_data
+from .util import data_dir, default_download_dir, migrate_legacy_data
+
+
+_CRASH_LOG = None     # kept open for the life of the process
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -19,6 +23,12 @@ def main(argv: list[str] | None = None) -> int:
     urls = [a for a in argv[1:] if a.startswith(("http://", "https://", "ftp://"))]
 
     migrate_legacy_data()      # KUDM -> Warpdown (0.5): carry over the download list and settings
+    global _CRASH_LOG
+    try:                       # on a crash, Python writes the stack of every thread here (helps find rare bugs)
+        _CRASH_LOG = open(data_dir() / "crash.log", "a", buffering=1)
+        faulthandler.enable(file=_CRASH_LOG, all_threads=True)
+    except OSError:
+        pass
     app = QApplication(argv)
     app.setApplicationName("warpdown")
     app.setOrganizationName("warpdown")

@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 
 from . import __version__
 from . import browsers, themes, ytdlp
+from .inbox import Inbox
 from .engine import probe
 from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
@@ -26,6 +27,44 @@ from .util import (category_folder, default_download_dir, ensure_category_dirs, 
                    sanitize_filename)
 
 _PEEK_SLOTS = threading.Semaphore(3)
+
+
+# ---- background workers -------------------------------------------------------------------------------------
+# Module-level on purpose: they get only plain data and a queue, so they cannot capture (and later release or emit on)
+# a dialog from a worker thread. Results reach the dialog through its Inbox, in the GUI thread.
+def _probe_worker(q, url: str) -> None:
+    try:
+        q.put(("probed", (probe(url), "")))
+    except Exception as e:  # noqa: BLE001
+        q.put(("probed", (None, str(e))))
+
+
+def _ytdlp_info_worker(q, url: str, headers: dict) -> None:
+    try:
+        q.put(("yt", (ytdlp.fetch_info(url, headers), "")))
+    except Exception as e:  # noqa: BLE001
+        q.put(("yt", (None, str(e) or e.__class__.__name__)))
+
+
+def _peek_worker(q, index: int, url: str, headers: dict) -> None:
+    with _PEEK_SLOTS:                          # a few at a time: servers may throttle bursts
+        for attempt in (1, 2):
+            try:
+                q.put(("sub", (index, peek_subtitle(url, headers))))
+                return
+            except Exception as e:  # noqa: BLE001
+                if attempt == 2:
+                    q.put(("sub", (index, {"error": str(e) or e.__class__.__name__})))
+                else:
+                    time.sleep(1)
+
+
+def _ytdlp_update_worker(q) -> None:
+    try:
+        ok, msg = ytdlp.update()
+        q.put(("yt_updated", (ok, msg)))
+    except Exception as e:  # noqa: BLE001
+        q.put(("yt_updated", (False, str(e))))
 
 FONT_SIZES = [8, 9, 10, 11, 12, 13, 14, 16, 18, 20, 22, 24]   # offered in Settings / by Ctrl +/-
 _BASE_FONT: QFont | None = None                                 # the system's own default font, captured once
@@ -183,12 +222,9 @@ class ProgressDelegate(QStyledItemDelegate):
 
 
 class AddDialog(QDialog):
-    probed = Signal(object, str)
-    sub_info = Signal(int, object)
-    yt_ready = Signal(object, str)
-
     def __init__(self, parent, url: str = "", headers: dict | None = None, use_ytdlp: bool = False):
         super().__init__(parent)
+        self._inbox = Inbox({"probed": self._on_probed, "yt": self._on_yt_ready, "sub": self._on_sub_info}, self)
         self._hdrs = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
                       for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
         self._yt_user_set = use_ytdlp            # don't auto-toggle if the browser already told us the mode
@@ -251,9 +287,6 @@ class AddDialog(QDialog):
         bb.accepted.connect(self.accept)
         bb.rejected.connect(self.reject)
         outer.addWidget(bb)
-        self.probed.connect(self._on_probed)
-        self.sub_info.connect(self._on_sub_info)
-        self.yt_ready.connect(self._on_yt_ready)
         self.use_ytdlp.clicked.connect(self._on_ytdlp_clicked)
         self.url.editingFinished.connect(self._probe)
         if use_ytdlp and ytdlp.available():
@@ -280,12 +313,7 @@ class AddDialog(QDialog):
     def _probe_ytdlp(self, u: str) -> None:
         self.info.setText("Asking yt-dlp… (can take a few seconds)")
 
-        def work():
-            try:
-                self.yt_ready.emit(ytdlp.fetch_info(u, self._hdrs), "")
-            except Exception as e:  # noqa: BLE001
-                self.yt_ready.emit(None, str(e) or e.__class__.__name__)
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=_ytdlp_info_worker, args=(self._inbox.queue, u, dict(self._hdrs)), daemon=True).start()
 
     def _on_yt_ready(self, info, err: str) -> None:
         if info is None:
@@ -348,18 +376,8 @@ class AddDialog(QDialog):
                 it.setText(f"{tag}  ·  {t.get('label') or tag}")
                 continue
 
-            def work(i=i, url=t["url"]):
-                with _PEEK_SLOTS:                      # a few at a time: servers may throttle bursts
-                    for attempt in (1, 2):
-                        try:
-                            self.sub_info.emit(i, peek_subtitle(url, self._sub_headers))
-                            return
-                        except Exception as e:  # noqa: BLE001
-                            if attempt == 2:
-                                self.sub_info.emit(i, {"error": str(e) or e.__class__.__name__})
-                            else:
-                                time.sleep(1)
-            threading.Thread(target=work, daemon=True).start()
+            threading.Thread(target=_peek_worker, args=(self._inbox.queue, i, t["url"], dict(self._sub_headers)),
+                             daemon=True).start()
         self._apply_default_checks()
 
     def _apply_default_checks(self) -> None:
@@ -420,12 +438,7 @@ class AddDialog(QDialog):
             return self._probe_ytdlp(u)
         self.info.setText("Checking…")
 
-        def work():
-            try:
-                self.probed.emit(probe(u), "")
-            except Exception as e:  # noqa: BLE001
-                self.probed.emit(None, str(e))
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=_probe_worker, args=(self._inbox.queue, u), daemon=True).start()
 
     def _on_probed(self, res, err):
         if res is None:
@@ -614,12 +627,12 @@ class ExtensionDialog(QDialog):
 
 
 class SettingsDialog(QDialog):
-    yt_updated = Signal(bool, str)
     font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
     theme_preview = Signal(str, str)  # (style, mode), likewise
 
     def __init__(self, parent, mgr: DownloadManager):
         super().__init__(parent)
+        self._inbox = Inbox({"yt_updated": self._on_yt_updated}, self)
         self.setWindowTitle("Settings")
         s = QSettings()
         self.dir = QLineEdit(s.value("download_dir", str(default_download_dir())))
@@ -667,13 +680,12 @@ class SettingsDialog(QDialog):
         self.ytbtn = QPushButton("Update yt-dlp")
         self.ytbtn.setEnabled(ytdlp.available())
         self.ytbtn.clicked.connect(self._update_ytdlp)
-        self.yt_updated.connect(self._on_yt_updated)
         yrow = QHBoxLayout()
         yrow.addWidget(self.ytlabel, 1)
         yrow.addWidget(self.ytbtn)
         form.addRow("Video sites:", yrow)
         extbtn = QPushButton("Set up browser extension…")
-        extbtn.clicked.connect(lambda: ExtensionDialog(self).exec())
+        extbtn.clicked.connect(self._open_extension_dialog)
         form.addRow("Browser:", extbtn)
         bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
         bb.accepted.connect(self.accept); bb.rejected.connect(self.reject)
@@ -685,20 +697,23 @@ def _settings_update_methods():
         self.ytbtn.setEnabled(False)
         self.ytlabel.setText("Updating yt-dlp…")
 
-        def work():
-            try:
-                self.yt_updated.emit(*ytdlp.update())
-            except Exception as e:  # noqa: BLE001
-                self.yt_updated.emit(False, str(e))
-        threading.Thread(target=work, daemon=True).start()
+        threading.Thread(target=_ytdlp_update_worker, args=(self._inbox.queue,), daemon=True).start()
+
+    def _open_extension_dialog(self):
+        d = ExtensionDialog(self)
+        try:
+            d.exec()
+        finally:
+            d.deleteLater()
 
     def _on_yt_updated(self, ok: bool, msg: str):
         self.ytbtn.setEnabled(True)
         self.ytlabel.setText(f"yt-dlp {ytdlp.version()}" + ("" if ok else f" — update failed: {msg[:60]}"))
-    return _update_ytdlp, _on_yt_updated
+    return _update_ytdlp, _on_yt_updated, _open_extension_dialog
 
 
-SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated = _settings_update_methods()
+SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated, SettingsDialog._open_extension_dialog = \
+    _settings_update_methods()
 
 
 class MainWindow(QMainWindow):
@@ -844,7 +859,11 @@ class MainWindow(QMainWindow):
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
 
     def extension_dialog(self) -> None:
-        ExtensionDialog(self).exec()
+        d = ExtensionDialog(self)
+        try:
+            d.exec()
+        finally:
+            d.deleteLater()
 
     def rescale(self) -> None:
         """Make columns, row height and toolbar icons follow the current text size."""
@@ -923,21 +942,24 @@ class MainWindow(QMainWindow):
             clip = QGuiApplication.clipboard().text().strip()
             url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
         d = AddDialog(self, url, headers or {}, use_ytdlp=(mode == "ytdlp"))
-        d.set_subs(subs or [], headers or {})
-        if filename:
-            d.name.setText(filename)
-        if d.exec() == QDialog.Accepted and d.url.text().strip():
-            s = QSettings()
-            s.setValue("download_dir", d.dir.text())
-            s.setValue("connections", d.conns.value())
-            if d.use_ytdlp.isChecked():
-                self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers, d.conns.value(),
-                             d.start_now.isChecked(), sort=d.sort.isChecked(), auto_subs=False, kind="ytdlp",
-                             opts=d.ytdlp_options())
-                return
-            self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
-                         d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs(),
-                         auto_subs=False)
+        try:
+            d.set_subs(subs or [], headers or {})
+            if filename:
+                d.name.setText(filename)
+            if d.exec() == QDialog.Accepted and d.url.text().strip():
+                s = QSettings()
+                s.setValue("download_dir", d.dir.text())
+                s.setValue("connections", d.conns.value())
+                if d.use_ytdlp.isChecked():
+                    self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers, d.conns.value(),
+                                 d.start_now.isChecked(), sort=d.sort.isChecked(), auto_subs=False, kind="ytdlp",
+                                 opts=d.ytdlp_options())
+                    return
+                self.mgr.add(d.url.text().strip(), d.dir.text(), d.name.text().strip(), headers,
+                             d.conns.value(), d.start_now.isChecked(), sort=d.sort.isChecked(), subs=d.selected_subs(),
+                             auto_subs=False)
+        finally:
+            d.deleteLater()      # gone for good once the dialog is closed (nothing may keep it alive)
 
     def delete_selected(self):
         ids = self._selected_ids()
@@ -975,6 +997,7 @@ class MainWindow(QMainWindow):
         else:
             self.set_font_size(original_font)          # cancelled: undo the live previews
             self.set_theme(*original_theme)
+        d.deleteLater()
 
     def _open_file(self, idx):
         it = self.model.item(idx.row())
