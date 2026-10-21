@@ -234,6 +234,10 @@ _ICONS = {
         'rx="2" fill="#2b8fc7"/><circle cx="5.2" cy="6" r=".9" fill="#fff"/><circle cx="8" cy="6" r=".9" fill="#fff"/>'
         '<path d="M8.5 13l-2 2 2 2M15.5 13l2 2-2 2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" '
         'stroke-linejoin="round" fill="none"/>'),
+    "images": (
+        '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4.5 4.5"/>',
+        '<rect x="2.5" y="4" width="19" height="16" rx="2.2" fill="#27ae60"/><circle cx="8" cy="9" r="2" fill="#fcd34d"/>'
+        '<path d="M2.5 17.5l6-6 4.5 4.5 3-3 5.5 5.5V18a2 2 0 0 1-2 2H4.7a2.2 2.2 0 0 1-2.2-2z" fill="#1e8449"/>'),
     "other": (
         '<path d="M5 12h.01M12 12h.01M19 12h.01" stroke-width="3"/>',
         '<circle cx="12" cy="12" r="9.5" fill="#7f8c8d"/><circle cx="7.5" cy="12" r="1.7" fill="#fff"/>'

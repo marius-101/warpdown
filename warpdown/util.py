@@ -97,6 +97,7 @@ CATEGORIES = {
     "Compressed": {".zip", ".rar", ".7z", ".tar", ".gz", ".bz2", ".xz", ".zst"},
     "Documents": {".pdf", ".doc", ".docx", ".xls", ".xlsx", ".ppt", ".pptx", ".odt", ".txt", ".epub"},
     "Programs": {".deb", ".rpm", ".appimage", ".run", ".sh", ".exe", ".msi", ".iso", ".flatpak", ".snap"},
+    "Images": {".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".svg", ".tif", ".tiff", ".avif", ".heic", ".ico"},
 }
 
 

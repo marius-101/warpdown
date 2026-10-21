@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import os
 import threading
+from urllib.parse import urlsplit
 import time
 import uuid
 from dataclasses import asdict, dataclass, field
@@ -113,22 +115,45 @@ class DownloadManager(QObject):
 
     def save(self) -> None:
         tmp = self._file.with_suffix(".tmp")
-        tmp.write_text(json.dumps([asdict(i) for i in self.items.values()], indent=1))
+        rows = []
+        for i in self.items.values():
+            d = asdict(i)
+            if i.status == COMPLETED:        # a finished download no longer needs the site's login cookie
+                d["headers"] = {k: v for k, v in d["headers"].items() if k not in ("cookie", "cookie_origin")}
+            rows.append(d)
+        tmp.write_text(json.dumps(rows, indent=1))
+        os.chmod(tmp, 0o600)                 # the list can contain cookies of unfinished downloads: owner only
         tmp.replace(self._file)
 
     # ---- API --------------------------------------------------------
     def add(self, url: str, directory: str, filename: str = "", headers: dict | None = None,
             connections: int | None = None, start: bool = True, sort: bool | None = None,
             subs: list | None = None, auto_subs: bool = True, kind: str = "http", opts: dict | None = None) -> Item:
-        it = Item(url=url, directory=directory, filename=filename, headers=headers or {},
-                  connections=connections or self.default_connections,
-                  sort=self.sort_by_category if sort is None else sort, subs=list(subs or []), auto_subs=auto_subs, kind=kind, opts=dict(opts or {}),
-                  status=QUEUED if start else PAUSED)
+        it = self._new_item(url, directory, filename, headers, connections, start, sort, subs, auto_subs, kind, opts)
         self.items[it.id] = it
         self.added.emit(it.id)
         self.save()
         self._schedule()
         return it
+
+    def _new_item(self, url, directory, filename, headers, connections, start, sort, subs, auto_subs, kind, opts) -> Item:
+        return Item(url=url, directory=directory, filename=filename, headers=dict(headers or {}),
+                    connections=connections or self.default_connections,
+                    sort=self.sort_by_category if sort is None else sort, subs=list(subs or []),
+                    auto_subs=auto_subs, kind=kind, opts=dict(opts or {}), status=QUEUED if start else PAUSED)
+
+    def add_many(self, urls: list[str], directory: str, headers: dict | None = None, connections: int | None = None,
+                 start: bool = True, sort: bool | None = None) -> list[Item]:
+        """Add a whole batch (e.g. links picked from a web page) with ONE save and ONE refresh, not one per item."""
+        items = [self._new_item(u, directory, "", headers, connections, start, sort, None, False, "http", None)
+                 for u in urls]
+        for it in items:
+            self.items[it.id] = it
+        if items:
+            self.added.emit(items[-1].id)
+            self.save()
+            self._schedule()
+        return items
 
     def pause(self, iid: str) -> None:
         it = self.items.get(iid)
@@ -211,7 +236,13 @@ class DownloadManager(QObject):
     @staticmethod
     def _browser_headers(it: Item) -> dict:
         m = {"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}
-        return {m[k]: v for k, v in it.headers.items() if k in m and v}
+        out = {m[k]: v for k, v in it.headers.items() if k in m and v}
+        origin = it.headers.get("cookie_origin")
+        # Links grabbed from a page can point at any site. The page's cookies are only for the page's own site,
+        # so they are dropped for everything else (also after a redirect to another host).
+        if origin and "Cookie" in out and urlsplit(it.url).netloc.lower() != origin.lower():
+            del out["Cookie"]
+        return out
 
     def _on_probed(self, iid: str, res, err: str) -> None:
         it = self.items.get(iid)

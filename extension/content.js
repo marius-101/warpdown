@@ -96,6 +96,35 @@
 
   function say(text) { menu.hidden = false; menu.innerHTML = ""; const d = document.createElement("div"); d.className = "msg"; d.textContent = text; menu.append(d); place(); }
 
+  // ---- "Download all links": list what the page offers (asked for by the background script) ----
+  function collectLinks(scope) {
+    const out = [], seen = new Set();
+    const sel = window.getSelection();
+    const hasSel = !!(sel && sel.rangeCount && !sel.isCollapsed);
+    const useSel = scope === "selection" || (scope === "auto" && hasSel);
+    const inScope = el => !useSel || (hasSel && sel.containsNode(el, true));
+    const add = (raw, text, source) => {
+      if (!raw) return;
+      let u;
+      try { u = new URL(raw, location.href); } catch (e) { return; }
+      if (u.protocol !== "http:" && u.protocol !== "https:") return;      // no javascript:, mailto:, blob:, data: ...
+      u.hash = "";
+      const url = u.href;
+      if (url === location.href.split("#")[0] || seen.has(url)) return;   // this very page, or already listed
+      seen.add(url);
+      out.push({ url, text: (text || "").replace(/\s+/g, " ").trim().slice(0, 120), source });
+    };
+    for (const a of document.querySelectorAll("a[href]")) if (inScope(a)) add(a.href, a.textContent || a.title || a.getAttribute("download"), "link");
+    for (const i of document.images) if (inScope(i)) add(i.currentSrc || i.src, i.alt, "image");
+    for (const m of document.querySelectorAll("video[src], audio[src], source[src]")) if (inScope(m)) add(m.src, "", "media");
+    return { links: out.slice(0, 5000), title: document.title, page: location.href, usedSelection: useSel };
+  }
+  try {
+    api.runtime.onMessage.addListener((msg, _sender, reply) => {
+      if (msg && msg.type === "collectLinks") reply(collectLinks(msg.scope));
+    });
+  } catch (e) { /* messaging unavailable: the feature is simply off on this page */ }
+
   btn.addEventListener("click", async e => {
     e.stopPropagation();
     say("Looking for the video…");

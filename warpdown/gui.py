@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import html
 import os
 import threading
 import time
@@ -12,18 +13,18 @@ from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontMetric
                            QPainter, QPalette, QShortcut)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QGroupBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem,
+    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
 from . import __version__
-from . import browsers, themes, ytdlp
+from . import browsers, linkgrab, themes, ytdlp
 from .inbox import Inbox
 from .engine import probe
 from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
 from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
-from .util import (category_folder, default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed,
+from .util import (CATEGORIES, category_folder, default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed,
                    sanitize_filename)
 
 _PEEK_SLOTS = threading.Semaphore(3)
@@ -107,7 +108,7 @@ def saved_font_size() -> int:
 
 COLUMNS = ["Name", "Size", "Progress", "Speed", "ETA", "Status", "Added"]
 CATS = ["All Downloads", "Unfinished", "Finished", "Video", "Music", "Compressed",
-        "Documents", "Programs", "Other"]
+        "Documents", "Programs", "Images", "Other"]
 
 
 class Model(QAbstractTableModel):
@@ -455,6 +456,148 @@ class AddDialog(QDialog):
         self.info.setToolTip(res.filename)
         if not self.name.text():
             self.name.setText(res.filename)
+
+
+class LinksDialog(QDialog):
+    """"Download all links on this page": choose which of the links, images and media found there to download."""
+
+    def __init__(self, parent, links: list, page_title: str = "", existing: set | None = None):
+        super().__init__(parent)
+        self.setWindowTitle("Download all links")
+        k = font_scale()
+        self.resize(int(940 * k), int(640 * k))
+        self._existing = existing or set()
+        lay = QVBoxLayout(self)
+        head = QLabel(f"<b>{len(links)} links</b> found on {html.escape(page_title or 'this page')}")
+        head.setWordWrap(True)
+        lay.addWidget(head)
+
+        # ---- filters ----
+        row = QHBoxLayout()
+        self.kind = QComboBox()
+        counts = linkgrab.category_counts(links)
+        self.kind.addItem("All files", linkgrab.KIND_ALL)
+        for cat in (*CATEGORIES, "Other", linkgrab.KIND_PAGES):
+            if counts.get(cat):
+                self.kind.addItem(f"{cat} ({counts[cat]})", cat)
+        self.filter = QLineEdit()
+        self.filter.setPlaceholderText("Only links containing these words (in the address or the link text)…")
+        self.filter.setClearButtonEnabled(True)
+        row.addWidget(QLabel("Show:")); row.addWidget(self.kind); row.addWidget(self.filter, 1)
+        lay.addLayout(row)
+        self.hide_pages = QCheckBox("Hide links without a file type (usually other web pages)")
+        self.hide_pages.setChecked(True)
+        lay.addWidget(self.hide_pages)
+
+        # ---- list ----
+        self.tree = QTreeWidget()
+        self.tree.setHeaderLabels(["Name", "Type", "Found as", "Address"])
+        self.tree.setRootIsDecorated(False)
+        self.tree.setAlternatingRowColors(True)
+        self.tree.setUniformRowHeights(True)
+        self.tree.setSelectionMode(QAbstractItemView.ExtendedSelection)
+        self._rows: list[tuple] = []
+        for l in links:
+            it = QTreeWidgetItem([l.name, l.category, linkgrab.SOURCE_LABELS.get(l.source, "Link"), l.url])
+            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
+            it.setCheckState(0, Qt.Unchecked)
+            it.setToolTip(0, l.text or l.name)
+            it.setToolTip(3, l.url)
+            if l.url.split("#", 1)[0] in self._existing:
+                it.setText(0, f"{l.name}  (already in your list)")
+            self._rows.append((it, l))
+            self.tree.addTopLevelItem(it)
+        for col, w in enumerate((int(300 * k), int(100 * k), int(80 * k), int(380 * k))):
+            self.tree.setColumnWidth(col, w)
+        lay.addWidget(self.tree, 1)
+
+        # ---- selection buttons + counter ----
+        row = QHBoxLayout()
+        for text, fn in (("Select all shown", lambda: self._set_all(Qt.Checked)),
+                         ("Select none", lambda: self._set_all(Qt.Unchecked)), ("Invert", self._invert)):
+            b = QPushButton(text)
+            b.clicked.connect(fn)
+            row.addWidget(b)
+        row.addStretch(1)
+        self.count = QLabel()
+        row.addWidget(self.count)
+        lay.addLayout(row)
+
+        # ---- where to save ----
+        settings = QSettings()
+        form = QFormLayout()
+        self.dir = QLineEdit(str(settings.value("download_dir", str(default_download_dir()))))
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        drow = QHBoxLayout()
+        drow.addWidget(self.dir, 1); drow.addWidget(browse)
+        form.addRow("Save to:", drow)
+        self.sort = QCheckBox("Sort into category folders (Video, Music, Images, …)")
+        self.sort.setChecked(str(settings.value("sort_by_category", "true")).lower() == "true")
+        self.start_now = QCheckBox("Start immediately")
+        self.start_now.setChecked(True)
+        form.addRow("", self.sort)
+        form.addRow("", self.start_now)
+        lay.addLayout(form)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+
+        self.kind.currentIndexChanged.connect(self._apply_filter)
+        self.filter.textChanged.connect(self._apply_filter)
+        self.hide_pages.toggled.connect(self._apply_filter)
+        self.tree.itemChanged.connect(lambda *_: self._update_count())
+        self._apply_filter()
+        # A short list is pre-ticked (links already in your list stay unticked); a long one is left for you to filter.
+        visible = self._visible()
+        if len(visible) <= 100:
+            self._set_all(Qt.Checked)
+
+    # ---- helpers ----
+    def _visible(self) -> list:
+        return [(it, l) for it, l in self._rows if not it.isHidden()]
+
+    def _is_known(self, l) -> bool:
+        return l.url.split("#", 1)[0] in self._existing
+
+    def _apply_filter(self) -> None:
+        kind, text, hide = self.kind.currentData(), self.filter.text(), self.hide_pages.isChecked()
+        self.tree.setUpdatesEnabled(False)
+        for it, l in self._rows:
+            it.setHidden(not linkgrab.matches(l, kind, text, hide))
+        self.tree.setUpdatesEnabled(True)
+        self._update_count()
+
+    def _set_all(self, state) -> None:
+        self.tree.blockSignals(True)
+        for it, l in self._visible():
+            it.setCheckState(0, Qt.Unchecked if (state == Qt.Checked and self._is_known(l)) else state)
+        self.tree.blockSignals(False)
+        self._update_count()
+
+    def _invert(self) -> None:
+        self.tree.blockSignals(True)
+        for it, _l in self._visible():
+            it.setCheckState(0, Qt.Unchecked if it.checkState(0) == Qt.Checked else Qt.Checked)
+        self.tree.blockSignals(False)
+        self._update_count()
+
+    def selected_links(self) -> list:
+        """Ticked links that are also shown by the current filter."""
+        return [l for it, l in self._visible() if it.checkState(0) == Qt.Checked]
+
+    def _update_count(self) -> None:
+        n, shown = len(self.selected_links()), len(self._visible())
+        self.count.setText(f"{n} selected of {shown} shown")
+        ok = self.buttons.button(QDialogButtonBox.Ok)
+        ok.setText(f"Download {n} file{'s' if n != 1 else ''}")
+        ok.setEnabled(n > 0)
+
+    def _browse(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Save to", self.dir.text())
+        if d:
+            self.dir.setText(d)
 
 
 class ExtensionDialog(QDialog):
@@ -808,7 +951,7 @@ class MainWindow(QMainWindow):
                      "Open Folder": "folder", "Browser": "browser", "Settings": "settings"}
     _CATEGORY_KEYS = {"All Downloads": "all", "Unfinished": "unfinished", "Finished": "finished", "Video": "video",
                       "Music": "music", "Compressed": "compressed", "Documents": "documents",
-                      "Programs": "programs", "Other": "other"}
+                      "Programs": "programs", "Images": "images", "Other": "other"}
 
     def refresh_icons(self) -> None:
         """Toolbar + category icons for the current style (the System default keeps the desktop's own icons)."""
@@ -857,6 +1000,27 @@ class MainWindow(QMainWindow):
                 return
             folder.mkdir(parents=True, exist_ok=True)
         QDesktopServices.openUrl(QUrl.fromLocalFile(str(folder)))
+
+    def links_dialog(self, raw_links: list, headers: dict | None = None, page: str = "", title: str = "") -> None:
+        """Browser extension: "Download all links on this page"."""
+        links = linkgrab.build_links(raw_links)
+        if not links:
+            QMessageBox.information(self, "Download all links", "No downloadable links were found.")
+            return
+        existing = {it.url.split("#", 1)[0] for it in self.mgr.items.values()}
+        d = LinksDialog(self, links, title, existing)
+        try:
+            if d.exec() == QDialog.Accepted:
+                chosen = d.selected_links()
+                hdrs = dict(headers or {})
+                if page and not hdrs.get("referer"):
+                    hdrs["referer"] = page
+                QSettings().setValue("download_dir", d.dir.text())
+                self.mgr.add_many([l.url for l in chosen], d.dir.text(), hdrs, None, d.start_now.isChecked(),
+                                  sort=d.sort.isChecked())
+                self.status.showMessage(f"Added {len(chosen)} download{'s' if len(chosen) != 1 else ''}", 6000)
+        finally:
+            d.deleteLater()
 
     def extension_dialog(self) -> None:
         d = ExtensionDialog(self)

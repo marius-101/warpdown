@@ -7,8 +7,6 @@ import subprocess
 import sys
 import time
 
-from PySide6.QtCore import QCoreApplication
-
 from warpdown import ipc
 
 
@@ -35,7 +33,6 @@ def log(text):
 
 def main():
     log("host started")
-    app = QCoreApplication(sys.argv)  # noqa: F841 (needed by QLocalSocket)
     while True:
         msg = read_message()
         if msg is None:

@@ -39,6 +39,26 @@ async function note(msg) {
 }
 note("background started");
 
+// "Download all links": ask the page for its links, then hand the list to Warpdown (which shows the picker).
+async function grabLinks(tabId, scope) {
+  let r;
+  try {
+    r = await api.tabs.sendMessage(tabId, { type: "collectLinks", scope }, { frameId: 0 });
+  } catch (e) {
+    return { ok: false, error: "The extension can't read this page (browser pages and the add-on store are off limits)." };
+  }
+  if (!r || !r.links || !r.links.length) {
+    return { ok: false, error: r && r.usedSelection ? "No links in the selection." : "No links found on this page." };
+  }
+  const cookie = await cookieHeader(r.page);        // the page's own site only; Warpdown never sends it to other sites
+  const res = await api.runtime.sendNativeMessage(HOST, {
+    action: "links", links: r.links, title: r.title, page: r.page,
+    headers: { cookie, cookie_origin: new URL(r.page).host, referer: r.page, user_agent: navigator.userAgent },
+  });
+  await note(`sent ${r.links.length} links from ${r.page.slice(0, 60)}`);
+  return res && res.ok ? { ok: true, count: r.links.length } : { ok: false, error: "Warpdown is not reachable." };
+}
+
 // Take over normal browser downloads.
 api.downloads.onCreated.addListener(async (d) => {
   const url = d.finalUrl || d.url;
@@ -61,9 +81,13 @@ api.downloads.onCreated.addListener(async (d) => {
 // Right-click "Download with Warpdown".
 api.runtime.onInstalled.addListener(() => {
   api.contextMenus.create({ id: "warpdown-link", title: "Download with Warpdown", contexts: ["link", "video", "audio"] });
+  api.contextMenus.create({ id: "warpdown-links", title: "Download all links on this page with Warpdown", contexts: ["page"] });
+  api.contextMenus.create({ id: "warpdown-links-sel", title: "Download links in the selection with Warpdown", contexts: ["selection"] });
   api.contextMenus.create({ id: "warpdown-page", title: "Download this page's video with Warpdown (yt-dlp)", contexts: ["page"] });
 });
 api.contextMenus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === "warpdown-links") return grabLinks(tab.id, "page");
+  if (info.menuItemId === "warpdown-links-sel") return grabLinks(tab.id, "selection");
   if (info.menuItemId === "warpdown-page") return sendToWarpdown(info.pageUrl, { referrer: info.pageUrl, mode: "ytdlp" });
   const url = info.linkUrl || info.srcUrl;
   if (url) sendToWarpdown(url, { referrer: tab && tab.url });
@@ -127,6 +151,10 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
       // functions can't cross the message boundary: send precomputed names instead
       reply({ list: list.map(m => ({ ...m, name: nf(m) })), subs });
     }
+    return true;
+  }
+  if (msg.type === "grabLinks") {
+    grabLinks(msg.tabId, msg.scope || "auto").then(reply, e => reply({ ok: false, error: String(e) }));
     return true;
   }
   if (msg.type === "ytdlp") {

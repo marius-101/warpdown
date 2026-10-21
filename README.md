@@ -11,11 +11,15 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
   early takes over half of the largest remaining piece, so all connections stay busy to the end
 - **Pause / resume**, also across restarts (servers that support HTTP Range)
 - **Queue** with a configurable number of simultaneous downloads and a global speed limit
-- **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Other — created automatically;
+- **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Images, Other — created automatically;
   files are sorted into them (file types are recognised from the name, `Content-Type` or the file's first bytes)
 - **Browser integration** (Firefox and Chromium family): takes over browser downloads, a "Download with Warpdown"
   context menu, and a floating **Download this video** button over page videos (full, compact arrow-only, or hidden — your choice in the
   toolbar popup)
+- **Download all links on a page** — from the toolbar popup or the right-click menu (also *only the links in your
+  selection*): a picker lists the page's links, images and media with filters by type and by words, *select all /
+  none / invert*, and one destination folder. Hundreds of files in one go; cookies of the page are only ever sent to
+  the page's own site
 - **Video streams**: plain files and **HLS (`.m3u8`)** streams, including AES-128 encrypted ones, merged to MP4
   with ffmpeg. *DRM-protected streams are not supported and never will be.*
 - **Subtitles**: pick which tracks to save (`.vtt` / `.srt` / `.ass`), stored next to the video with the language in
@@ -64,6 +68,8 @@ native/install.sh        # registers the native-messaging host and a desktop lau
 `WARPDOWN_CHROME_EXTENSION_ID=<id> native/install.sh`.
 
 ### Using it
+- **Download all links:** click the toolbar icon → *Download all links on this page…* (or right-click the page). If
+  you select some text first, only the links inside the selection are collected.
 - Click a download link as usual — Warpdown takes over and asks where to save it.
 - Hover over a video and press **Download this video**. On sites where the page itself is the source
   (YouTube, …) it opens Warpdown's yt-dlp mode.

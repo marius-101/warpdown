@@ -41,3 +41,13 @@ document.getElementById("yt").onclick = async () => {
     r => { out.textContent = r && r.ok ? "Sent to Warpdown ✓" : "Failed: " + ((r && r.error) || "Warpdown not reachable"); },
     e => { out.textContent = "Failed: " + e; });
 };
+
+document.getElementById("links").onclick = async () => {
+  const [tab] = await api.tabs.query({ active: true, currentWindow: true });
+  const out = document.getElementById("linksr"); out.textContent = "…";
+  // "auto": if some text is selected on the page, only the links in the selection are collected
+  api.runtime.sendMessage({ type: "grabLinks", tabId: tab.id, scope: "auto" }).then(
+    r => { out.textContent = r && r.ok ? `Sent ${r.count} links to Warpdown ✓` : ((r && r.error) || "Failed");
+           if (r && r.ok) setTimeout(() => window.close(), 900); },
+    e => { out.textContent = "Failed: " + e; });
+};
