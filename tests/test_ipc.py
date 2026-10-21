@@ -1,3 +1,5 @@
+from pathlib import Path
+import sys
 import os
 import queue
 import socket
@@ -36,6 +38,9 @@ def collect(q, n, timeout=10):
     return out
 
 
+unix_only = pytest.mark.skipif(sys.platform.startswith('win'), reason='Unix sockets (Windows uses TCP)')
+
+
 def test_roundtrip_many_messages_keep_their_order(path):
     q = queue.SimpleQueue()
     srv = ipc.IpcServer(q)
@@ -52,6 +57,7 @@ def test_send_without_a_running_instance_returns_false(path):
     assert ipc.send({"action": "show"}) is False
 
 
+@unix_only
 def test_socket_is_private_and_removed_on_close(path):
     srv = ipc.IpcServer(queue.SimpleQueue())
     assert srv.listen()
@@ -60,6 +66,7 @@ def test_socket_is_private_and_removed_on_close(path):
     assert not os.path.exists(path)
 
 
+@unix_only
 def test_stale_socket_file_is_replaced_but_a_live_instance_is_not_stolen(path):
     stale = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     stale.bind(path)
@@ -74,6 +81,7 @@ def test_stale_socket_file_is_replaced_but_a_live_instance_is_not_stolen(path):
     first.close()
 
 
+@unix_only
 def test_garbage_and_non_dict_messages_are_ignored(path):
     q = queue.SimpleQueue()
     srv = ipc.IpcServer(q)
@@ -87,6 +95,7 @@ def test_garbage_and_non_dict_messages_are_ignored(path):
     assert [args[0] for _, args in got] == [{"action": "ok"}] and q.empty()
 
 
+@unix_only
 def test_a_stuck_client_does_not_block_the_next_one(path):
     q = queue.SimpleQueue()
     srv = ipc.IpcServer(q)

@@ -1,3 +1,5 @@
+from pathlib import Path
+import sys
 import pytest
 from PySide6.QtCore import QSettings, Qt
 
@@ -32,6 +34,8 @@ def win(qapp, tmp_path, monkeypatch):
     yield w
     m.shutdown()
 
+linux_only = pytest.mark.skipif(sys.platform.startswith('win'), reason='Linux browser paths')
+
 
 def row(w, name):
     return next(w.cats.item(i) for i in range(w.cats.count()) if w.cats.item(i).text() == name)
@@ -47,30 +51,30 @@ def test_category_folder_mapping(tmp_path):
 def test_double_click_opens_category_folders(win):
     (win.root / "Video").mkdir(parents=True)
     win.open_category_folder(row(win, "Video"))
-    assert FakeDesktop.opened == [str(win.root / "Video")]
+    assert [Path(p) for p in FakeDesktop.opened] == [win.root / "Video"]
 
     win.open_category_folder(row(win, "Music"))                     # folder doesn't exist yet: explain, don't open
-    assert FakeDesktop.opened == [str(win.root / "Video")] and "Music" in win.status.currentMessage()
+    assert [Path(p) for p in FakeDesktop.opened] == [win.root / "Video"] and "Music" in win.status.currentMessage()
 
     for name in ("Unfinished", "Finished"):                         # filters, not folders
         win.open_category_folder(row(win, name))
     assert len(FakeDesktop.opened) == 1 and "filter" in win.status.currentMessage()
 
     win.open_category_folder(row(win, "All Downloads"))             # the main folder is created on demand
-    assert FakeDesktop.opened[-1] == str(win.root) and win.root.is_dir()
+    assert Path(FakeDesktop.opened[-1]) == win.root and win.root.is_dir()
 
 
 def test_open_folder_button_uses_selection_else_root(win):
     d = win.root / "Video"
     d.mkdir(parents=True)
     win.open_folder()                                               # nothing selected -> main folder
-    assert FakeDesktop.opened[-1] == str(win.root)
+    assert Path(FakeDesktop.opened[-1]) == win.root
     it = win.mgr.add("http://x/a.mp4", str(d), filename="a.mp4", start=False)
     win.model.rebuild()
     win.table.selectRow(0)
     assert win._selected_ids() == [it.id]
     win.open_folder()                                               # selected download -> its own folder
-    assert FakeDesktop.opened[-1] == str(d)
+    assert Path(FakeDesktop.opened[-1]) == d
 
 
 def test_toolbar_order_settings_last(win):
@@ -93,6 +97,7 @@ def test_build_xpi_contains_the_extension(tmp_path, monkeypatch):
     assert browsers.build_xpi() is None
 
 
+@linux_only
 def test_browser_detection(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     real_ff = tmp_path / "firefox"                                   # a stand-in for a genuine Firefox launcher
@@ -117,6 +122,7 @@ def test_browser_detection(tmp_path, monkeypatch):
     assert browsers.chromium_command() == ["flatpak", "run", "com.brave.Browser"]
 
 
+@linux_only
 def test_registration_status(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     assert browsers.registration_status() == [("Firefox", False)]
@@ -132,6 +138,7 @@ def test_registration_status(tmp_path, monkeypatch):
     assert dict(browsers.registration_status())["Chrome / Chromium / Brave"] is True
 
 
+@linux_only
 def test_installer_missing_is_reported(monkeypatch):
     monkeypatch.setattr(browsers, "installer_script", lambda: None)
     ok, msg = browsers.run_installer()

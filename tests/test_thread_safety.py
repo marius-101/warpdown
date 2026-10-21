@@ -29,7 +29,7 @@ def pump(app, seconds):
 def test_threads_only_run_module_level_functions_with_plain_arguments(module):
     """threading.Thread(target=...) must name a module-level function and must not be handed `self`: a closure over a
     widget/QObject is exactly what let worker threads release dialogs (double delete) or emit on dead ones."""
-    tree = ast.parse((PKG / module).read_text())
+    tree = ast.parse((PKG / module).read_text(encoding="utf-8"))
     top_level = {n.name for n in tree.body if isinstance(n, ast.FunctionDef)}
     problems = []
     for node in ast.walk(tree):

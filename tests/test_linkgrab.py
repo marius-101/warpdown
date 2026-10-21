@@ -1,3 +1,5 @@
+import sys
+from pathlib import Path
 import os
 import stat
 import time
@@ -150,6 +152,7 @@ def test_page_cookies_are_only_sent_to_the_page_site(env):
     assert "Cookie" not in m._browser_headers(same)
 
 
+@pytest.mark.skipif(sys.platform.startswith('win'), reason='POSIX file modes')
 def test_download_list_file_is_private_and_forgets_cookies_of_finished_downloads(env):
     import json
     w, m, tmp = env

@@ -133,7 +133,7 @@ def fetch_subtitle(url: str, headers: dict, video_path: Path, lang: str = "", la
     tag = tag_for(lang, label, url)
     for old in video_path.parent.glob(f"{glob_escape(stem)}.*{ext}"):
         try:
-            if old.read_text(encoding="utf-8") == text:
+            if old.read_bytes().decode("utf-8", "replace") == text:
                 return old
         except OSError:
             pass
@@ -142,5 +142,5 @@ def fetch_subtitle(url: str, headers: dict, video_path: Path, lang: str = "", la
     while dest.exists():
         dest = video_path.with_name(f"{stem}.{tag}{n}{ext}")
         n += 1
-    dest.write_text(text, encoding="utf-8")
+    dest.write_bytes(text.encode("utf-8"))              # exactly as received (write_text would change line endings on Windows)
     return dest

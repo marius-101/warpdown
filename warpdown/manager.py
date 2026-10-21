@@ -27,7 +27,8 @@ from .hls import HlsDownloader
 from .scheduler import Schedule
 from .subtitles import fetch_subtitle, matches_langs, tag_for
 from .ytdlp import YtdlpDownloader
-from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
+from .osutil import IS_WINDOWS
+from .util import sanitize_filename, category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
 QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR, RETRYING = (
     "Queued", "Connecting", "Downloading", "Paused", "Completed", "Error", "Retrying")
@@ -479,6 +480,8 @@ class DownloadManager(QObject):
 
     def _prepare_destination(self, it: Item, name: str) -> str:
         """Pick category folder + unique filename. Returns an error message, or '' on success."""
+        if IS_WINDOWS:
+            name = sanitize_filename(name)           # page titles contain characters Windows file names cannot have
         it.category = category_for(name)
         if it.sort:
             it.directory = str(Path(it.directory) / it.category)   # IDM-style folder per file type

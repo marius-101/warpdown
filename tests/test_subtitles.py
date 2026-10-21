@@ -1,3 +1,6 @@
+import pytest
+import sys
+from pathlib import Path
 import functools
 import http.server
 import os
@@ -75,7 +78,7 @@ def test_manager_saves_subtitles_next_to_video(qapp, tmp_path, monkeypatch):
     while (it.status != COMPLETED or not it.sub_files) and time.time() - t0 < 30:
         qapp.processEvents()
         time.sleep(0.05)
-    names = sorted(p.rsplit("/", 1)[-1] for p in it.sub_files)
+    names = sorted(Path(p).name for p in it.sub_files)
     assert it.status == COMPLETED and names == ["Show - Ep 1.eng.vtt", "Show - Ep 1.ger.srt"]
     assert (tmp_path / "Video" / "Show - Ep 1.eng.vtt").exists()
     m.shutdown()
