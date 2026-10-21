@@ -1172,6 +1172,7 @@ class MainWindow(QMainWindow):
         self._update_status()
 
         self.tray = QSystemTrayIcon(app_icon(), self)
+        self.tray.setToolTip("Warpdown")
         tm = QMenu()
         tm.addAction("Show", self.show_raise)
         tm.addAction("Add URL…", self.add_dialog)
@@ -1524,6 +1525,8 @@ class MainWindow(QMainWindow):
         if self.mgr.schedule.enabled:
             sched = " · scheduler: " + ("running" if self.mgr.gate_open else "waiting")
         self.status.showMessage(f"{len(active)} active · {fmt_speed(total) or '0 B/s'} · {len(its)} total{sched}")
+        if hasattr(self, "tray"):          # hovering the tray icon: name plus what is going on
+            self.tray.setToolTip("Warpdown" + (f"\n{len(active)} downloading · {fmt_speed(total)}" if active else ""))
 
     def _notify_done(self, iid):
         it = self.mgr.items.get(iid)
