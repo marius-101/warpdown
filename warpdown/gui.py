@@ -4,26 +4,31 @@ from __future__ import annotations
 
 import html
 import os
+import subprocess
 import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import QAbstractTableModel, QModelIndex, QRectF, QSettings, QSize, Qt, QUrl, Signal
-from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontMetrics, QGuiApplication, QIcon, QKeySequence,
-                           QPainter, QPalette, QShortcut)
+from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QRectF, QSettings, QSize, Qt, QTime, QTimer, QUrl,
+                            Signal)
+from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon,
+                           QKeySequence, QPainter, QPalette, QShortcut)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QGroupBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
-    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QTreeWidget, QTreeWidgetItem,
+    QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QTimeEdit, QTreeWidget, QTreeWidgetItem,
     QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
 from . import __version__
-from . import browsers, linkgrab, themes, ytdlp
+from . import batch, browsers, linkgrab, themes, ytdlp
+from .clipboard import ClipboardWatcher
+from .scheduler import (AFTER_LABELS, AFTER_NOTHING, AFTER_POWEROFF, AFTER_QUIT, AFTER_SLEEP, DAY_NAMES, Schedule,
+                        power_command)
 from .inbox import Inbox
 from .engine import probe
 from .subtitles import default_checked, matches_langs, parse_langs, peek_subtitle, tag_for
-from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, DownloadManager, Item
+from .manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, QUEUED, RETRYING, DownloadManager, Item
 from .util import (CATEGORIES, category_folder, default_download_dir, ensure_category_dirs, fmt_eta, fmt_size, fmt_speed,
                    sanitize_filename)
 
@@ -121,6 +126,7 @@ class Model(QAbstractTableModel):
         mgr.added.connect(lambda _: self.rebuild())
         mgr.removed.connect(lambda _: self.rebuild())
         mgr.changed.connect(self._changed)
+        mgr.schedule_changed.connect(self._all_changed)
 
     def matches(self, it: Item) -> bool:
         f = self.filter
@@ -137,6 +143,10 @@ class Model(QAbstractTableModel):
         self.rows = [i.id for i in sorted(self.mgr.items.values(), key=lambda i: -i.added)
                      if self.matches(i)]
         self.endResetModel()
+
+    def _all_changed(self) -> None:
+        if self.rows:
+            self.dataChanged.emit(self.index(0, 0), self.index(len(self.rows) - 1, len(COLUMNS) - 1))
 
     def _changed(self, iid: str) -> None:
         if iid in self.rows:
@@ -175,6 +185,13 @@ class Model(QAbstractTableModel):
                     return fmt_eta((it.size - it.downloaded) / it.speed)
                 return ""
             if c == 5:
+                if it.status == RETRYING:
+                    left = max(0, int(it.retry_at - time.time()))
+                    return f"Retrying in {fmt_eta(left) or '0s'} (attempt {it.retries}/{self.mgr.max_retries}) · {it.error[:40]}"
+                if it.held:
+                    return "Paused by the schedule"
+                if it.status == QUEUED and not self.mgr.gate_open:
+                    return "Scheduled (waiting)"
                 if it.error:
                     return f"{it.status}: {it.error}"
                 n = len(it.sub_files)
@@ -600,6 +617,207 @@ class LinksDialog(QDialog):
             self.dir.setText(d)
 
 
+def run_power_command(cmd: list[str]) -> None:
+    """Sleep / shut down the computer (a function of its own so tests can replace it)."""
+    subprocess.Popen(cmd, start_new_session=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+
+
+class BatchDialog(QDialog):
+    """Add many downloads at once: paste addresses (one per line); ranges like photo[01-20].jpg are expanded."""
+
+    def __init__(self, parent, prefill: str = ""):
+        super().__init__(parent)
+        self.setWindowTitle("Batch download")
+        k = font_scale()
+        self.resize(int(780 * k), int(640 * k))
+        lay = QVBoxLayout(self)
+        intro = QLabel("Paste web addresses, <b>one per line</b>. Ranges are expanded: "
+                       "<code>photo[01-20].jpg</code> &nbsp; <code>file[1-100:5].zip</code> (every 5th) &nbsp; "
+                       "<code>part_[a-f].rar</code>. Lines starting with # are ignored.")
+        intro.setWordWrap(True)
+        lay.addWidget(intro)
+        self.text = QPlainTextEdit()
+        self.text.setLineWrapMode(QPlainTextEdit.NoWrap)
+        self.text.setFont(QFontDatabase.systemFont(QFontDatabase.FixedFont))
+        self.text.setPlaceholderText("https://example.org/files/report.pdf\nhttps://example.org/photos/img[001-050].jpg")
+        self.text.setPlainText(prefill)
+        lay.addWidget(self.text, 1)
+        row = QHBoxLayout()
+        paste = QPushButton("Paste from clipboard")
+        paste.clicked.connect(lambda: self.text.appendPlainText(QGuiApplication.clipboard().text().strip()))
+        clear = QPushButton("Clear")
+        clear.clicked.connect(self.text.clear)
+        row.addWidget(paste); row.addWidget(clear); row.addStretch(1)
+        lay.addLayout(row)
+        self.preview = QLabel()
+        self.preview.setWordWrap(True)
+        lay.addWidget(self.preview)
+
+        settings = QSettings()
+        form = QFormLayout()
+        self.dir = QLineEdit(str(settings.value("download_dir", str(default_download_dir()))))
+        browse = QPushButton("Browse…")
+        browse.clicked.connect(self._browse)
+        drow = QHBoxLayout()
+        drow.addWidget(self.dir, 1); drow.addWidget(browse)
+        form.addRow("Save to:", drow)
+        self.sort = QCheckBox("Sort into category folders (Video, Music, Images, …)")
+        self.sort.setChecked(str(settings.value("sort_by_category", "true")).lower() == "true")
+        self.start_now = QCheckBox("Start immediately")
+        self.start_now.setChecked(True)
+        form.addRow("", self.sort)
+        form.addRow("", self.start_now)
+        lay.addLayout(form)
+        self.buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        self.buttons.accepted.connect(self.accept)
+        self.buttons.rejected.connect(self.reject)
+        lay.addWidget(self.buttons)
+
+        self._debounce = QTimer(self)                  # re-read the text 0.2 s after typing stops
+        self._debounce.setSingleShot(True)
+        self._debounce.setInterval(200)
+        self._debounce.timeout.connect(self._update)
+        self.text.textChanged.connect(self._debounce.start)
+        self._update()
+
+    def _browse(self) -> None:
+        d = QFileDialog.getExistingDirectory(self, "Save to", self.dir.text())
+        if d:
+            self.dir.setText(d)
+
+    def result_info(self):
+        return batch.parse_text(self.text.toPlainText())
+
+    def urls(self) -> list:
+        return self.result_info().urls
+
+    def _update(self) -> None:
+        res = self.result_info()
+        n = len(res.urls)
+        lines = [f"<b>{n} download{'s' if n != 1 else ''}</b> from {res.lines_used} line{'s' if res.lines_used != 1 else ''}"]
+        if n:
+            sample = [res.urls[0]] + ([res.urls[-1]] if n > 1 else [])
+            lines.append("e.g. " + "<br>&nbsp;&nbsp;&nbsp;&nbsp;…&nbsp;" .join(html.escape(u) for u in sample))
+        if res.truncated:
+            lines.append(f"<b>Only the first {batch.LIMIT:,} addresses are used</b> (that is the limit for one batch).")
+        if res.skipped:
+            lines.append(f"{len(res.skipped)} line{'s' if len(res.skipped) != 1 else ''} without a web address ignored.")
+        self.preview.setText("<br>".join(lines))
+        ok = self.buttons.button(QDialogButtonBox.Ok)
+        ok.setText(f"Download {n} file{'s' if n != 1 else ''}")
+        ok.setEnabled(n > 0)
+
+
+class SchedulerDialog(QDialog):
+    """When may downloads run, and what happens when they are all finished."""
+
+    def __init__(self, parent, schedule: Schedule, after_action: str = AFTER_NOTHING):
+        super().__init__(parent)
+        self.setWindowTitle("Scheduler")
+        self.setMinimumWidth(int(520 * font_scale()))
+        lay = QVBoxLayout(self)
+        self.enabled = QCheckBox("Hold downloads and run them on a schedule")
+        self.enabled.setChecked(schedule.enabled)
+        lay.addWidget(self.enabled)
+        form = QFormLayout()
+        self.start = QTimeEdit(QTime(*schedule.start))
+        self.start.setDisplayFormat("HH:mm")
+        self.use_stop = QCheckBox("Stop at")
+        self.use_stop.setChecked(schedule.stop is not None)
+        self.stop = QTimeEdit(QTime(*(schedule.stop or (6, 0))))
+        self.stop.setDisplayFormat("HH:mm")
+        srow = QHBoxLayout()
+        srow.addWidget(self.use_stop); srow.addWidget(self.stop); srow.addStretch(1)
+        form.addRow("Start at:", self.start)
+        form.addRow("", srow)
+        drow = QHBoxLayout()
+        self.days = []
+        for i, name in enumerate(DAY_NAMES):
+            c = QCheckBox(name)
+            c.setChecked(i in schedule.days)
+            self.days.append(c)
+            drow.addWidget(c)
+        form.addRow("Days:", drow)
+        lay.addLayout(form)
+        self.summary = QLabel()
+        self.summary.setWordWrap(True)
+        lay.addWidget(self.summary)
+        note = QLabel("<small>With a stop time, downloads run only in that window (it may cross midnight). Without one, "
+                      "the queue is released at the start time and runs until everything is finished. Downloads "
+                      "you add outside the window wait; ones you paused yourself stay paused.</small>")
+        note.setWordWrap(True)
+        lay.addWidget(note)
+        form2 = QFormLayout()
+        self.after = QComboBox()
+        for key, label in AFTER_LABELS.items():
+            self.after.addItem(label, key)
+        self.after.setCurrentIndex(max(0, self.after.findData(after_action)))
+        form2.addRow("When all downloads are finished:", self.after)
+        lay.addLayout(form2)
+        warn = QLabel("<small>Before the computer sleeps or shuts down you get 60 seconds to cancel.</small>")
+        lay.addWidget(warn)
+        bb = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        for w in (self.enabled, self.use_stop, *self.days):
+            w.toggled.connect(self._refresh)
+        for w in (self.start, self.stop):
+            w.timeChanged.connect(self._refresh)
+        self._refresh()
+
+    def schedule(self) -> Schedule:
+        st, sp = self.start.time(), self.stop.time()
+        return Schedule(enabled=self.enabled.isChecked(), start=(st.hour(), st.minute()),
+                        stop=(sp.hour(), sp.minute()) if self.use_stop.isChecked() else None,
+                        days=frozenset(i for i, c in enumerate(self.days) if c.isChecked()))
+
+    def after_action(self) -> str:
+        return str(self.after.currentData())
+
+    def _refresh(self) -> None:
+        self.stop.setEnabled(self.use_stop.isChecked())
+        self.summary.setText(self.schedule().describe())
+
+
+class CountdownDialog(QDialog):
+    """Shown when everything is finished and Warpdown is about to quit / sleep / shut down: a chance to cancel."""
+
+    WHAT = {AFTER_QUIT: "Warpdown will quit", AFTER_SLEEP: "The computer will go to sleep",
+            AFTER_POWEROFF: "The computer will shut down"}
+
+    def __init__(self, parent, action: str, seconds: int = 60):
+        super().__init__(parent)
+        self.setWindowTitle("All downloads finished")
+        self.left = seconds
+        self.what = self.WHAT.get(action, "Warpdown will continue")
+        lay = QVBoxLayout(self)
+        self.label = QLabel()
+        self.label.setWordWrap(True)
+        lay.addWidget(self.label)
+        bb = QDialogButtonBox()
+        now = bb.addButton("Do it now", QDialogButtonBox.AcceptRole)
+        bb.addButton("Cancel", QDialogButtonBox.RejectRole)
+        bb.accepted.connect(self.accept)
+        bb.rejected.connect(self.reject)
+        lay.addWidget(bb)
+        now.setDefault(False)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._tick)
+        self._timer.start(1000)
+        self._show()
+
+    def _show(self) -> None:
+        self.label.setText(f"All downloads are finished.\n\n{self.what} in {self.left} second{'s' if self.left != 1 else ''}.")
+
+    def _tick(self) -> None:
+        self.left -= 1
+        if self.left <= 0:
+            self.accept()
+        else:
+            self._show()
+
+
 class ExtensionDialog(QDialog):
     """Help for adding the Warpdown extension to Firefox / Chrome and registering the browser connector."""
 
@@ -790,6 +1008,12 @@ class SettingsDialog(QDialog):
         self.limit = QSpinBox(); self.limit.setRange(0, 1_000_000); self.limit.setSuffix(" KB/s")
         self.limit.setSpecialValueText("Unlimited")
         self.limit.setValue(int(s.value("speed_limit_kb", 0)))
+        self.retry = QCheckBox("Retry failed downloads automatically (temporary network or server problems)")
+        self.retry.setChecked(str(s.value("auto_retry", "true")).lower() == "true")
+        self.retries = QSpinBox(); self.retries.setRange(1, 20)
+        self.retries.setValue(int(s.value("max_retries", 5)))
+        self.clip = QCheckBox("Watch the clipboard for download links")
+        self.clip.setChecked(str(s.value("clipboard_watch", "false")).lower() == "true")
         self.fontsize = QComboBox()
         self.fontsize.addItem(f"System default ({base_font_pt():.0f} pt)", 0)
         for pt in FONT_SIZES:
@@ -818,6 +1042,9 @@ class SettingsDialog(QDialog):
         form.addRow("Connections per download:", self.conns)
         form.addRow("Simultaneous downloads:", self.active)
         form.addRow("Speed limit:", self.limit)
+        form.addRow("", self.retry)
+        form.addRow("Maximum retries:", self.retries)
+        form.addRow("", self.clip)
         form.addRow("Subtitle languages:", self.sublangs)
         self.ytlabel = QLabel(f"yt-dlp {ytdlp.version()}" if ytdlp.available() else "yt-dlp is not installed")
         self.ytbtn = QPushButton("Update yt-dlp")
@@ -905,6 +1132,9 @@ class MainWindow(QMainWindow):
         self.addToolBar(tb)
         self._act(tb, "Add URL", QIcon.fromTheme("list-add", st.standardIcon(QStyle.SP_FileDialogNewFolder)),
                   self.add_dialog, "Ctrl+N")
+        a = self._act(tb, "Batch", QIcon.fromTheme("view-list-details", st.standardIcon(QStyle.SP_FileDialogListView)),
+                      lambda: self.batch_dialog(), "Ctrl+Shift+N")
+        a.setToolTip("Add many downloads at once: paste a list, or use ranges like photo[01-20].jpg")
         self._act(tb, "Resume", QIcon.fromTheme("media-playback-start", st.standardIcon(QStyle.SP_MediaPlay)),
                   lambda: self._each(mgr.resume))
         self._act(tb, "Pause", QIcon.fromTheme("media-playback-pause", st.standardIcon(QStyle.SP_MediaPause)),
@@ -915,6 +1145,9 @@ class MainWindow(QMainWindow):
         a = self._act(tb, "Open Folder", QIcon.fromTheme("folder-open", st.standardIcon(QStyle.SP_DirOpenIcon)),
                       self.open_folder)
         a.setToolTip("Open the folder of the selected download (or the main downloads folder)")
+        a = self._act(tb, "Schedule", QIcon.fromTheme("chronometer", st.standardIcon(QStyle.SP_BrowserReload)),
+                      self.scheduler_dialog, "Ctrl+Shift+S")
+        a.setToolTip("Run downloads at night or at set times, and choose what happens when they are finished")
         a = self._act(tb, "Browser", QIcon.fromTheme("preferences-plugin", st.standardIcon(QStyle.SP_ComputerIcon)),
                       self.extension_dialog)
         a.setToolTip("Add the Warpdown extension to Firefox or Chrome")
@@ -938,6 +1171,10 @@ class MainWindow(QMainWindow):
         tm = QMenu()
         tm.addAction("Show", self.show_raise)
         tm.addAction("Add URL…", self.add_dialog)
+        tm.addAction("Batch download…", lambda: self.batch_dialog())
+        self.tray_clip = tm.addAction("Watch clipboard for downloads")
+        self.tray_clip.setCheckable(True)
+        self.tray_clip.toggled.connect(self._toggle_clipboard)
         tm.addSeparator()
         tm.addAction("Quit", QApplication.instance().quit)
         self.tray.setContextMenu(tm)
@@ -945,9 +1182,14 @@ class MainWindow(QMainWindow):
         self.tray.show()
         mgr.changed.connect(self._notify_done)
         self._notified: set[str] = set()
+        self.clip = ClipboardWatcher(self)
+        self.clip.urls_found.connect(self._on_clipboard_urls)
+        self.apply_clipboard_setting()
+        mgr.queue_finished.connect(lambda: QTimer.singleShot(0, self._on_queue_finished))
+        mgr.schedule_changed.connect(self._update_status)
 
     # ---- themes & icons ----
-    _TOOLBAR_KEYS = {"Add URL": "add", "Resume": "resume", "Pause": "pause", "Delete": "delete",
+    _TOOLBAR_KEYS = {"Add URL": "add", "Batch": "batch", "Schedule": "schedule", "Resume": "resume", "Pause": "pause", "Delete": "delete",
                      "Open Folder": "folder", "Browser": "browser", "Settings": "settings"}
     _CATEGORY_KEYS = {"All Downloads": "all", "Unfinished": "unfinished", "Finished": "finished", "Video": "video",
                       "Music": "music", "Compressed": "compressed", "Documents": "documents",
@@ -1021,6 +1263,86 @@ class MainWindow(QMainWindow):
                 self.status.showMessage(f"Added {len(chosen)} download{'s' if len(chosen) != 1 else ''}", 6000)
         finally:
             d.deleteLater()
+
+    def batch_dialog(self, prefill: str = "") -> None:
+        """Toolbar / tray / clipboard: add many downloads from a pasted list (with ranges)."""
+        d = BatchDialog(self, prefill)
+        try:
+            if d.exec() == QDialog.Accepted:
+                urls = d.urls()
+                if urls:
+                    QSettings().setValue("download_dir", d.dir.text())
+                    self.mgr.add_many(urls, d.dir.text(), None, None, d.start_now.isChecked(), sort=d.sort.isChecked())
+                    self.status.showMessage(f"Added {len(urls)} download{'s' if len(urls) != 1 else ''}", 6000)
+        finally:
+            d.deleteLater()
+
+    def scheduler_dialog(self) -> None:
+        s = QSettings()
+        keys = ("sched_enabled", "sched_start", "sched_stop", "sched_days")
+        current = Schedule.from_settings({k: s.value(k) for k in keys if s.contains(k)})
+        d = SchedulerDialog(self, current, str(s.value("after_action", AFTER_NOTHING)))
+        try:
+            if d.exec() == QDialog.Accepted:
+                new = d.schedule()
+                for k, v in new.to_settings().items():
+                    s.setValue(k, v)
+                s.setValue("after_action", d.after_action())
+                self.mgr.set_schedule(new)
+                self._update_status()
+        finally:
+            d.deleteLater()
+
+    def _on_queue_finished(self) -> None:
+        """Everything is downloaded: maybe quit / sleep / shut down, after a 60-second chance to cancel."""
+        action = str(QSettings().value("after_action", AFTER_NOTHING))
+        if action not in (AFTER_QUIT, AFTER_SLEEP, AFTER_POWEROFF):
+            return
+        self.tray.showMessage("Downloads finished", f"{CountdownDialog.WHAT[action]} in 60 seconds.",
+                              QSystemTrayIcon.Information, 5000)
+        d = CountdownDialog(self, action)
+        try:
+            go = d.exec() == QDialog.Accepted
+        finally:
+            d.deleteLater()
+        if go:
+            self.run_after_action(action)
+
+    def run_after_action(self, action: str) -> None:
+        self.mgr.save()
+        if action == AFTER_QUIT:
+            self.mgr.shutdown()
+            QApplication.instance().quit()
+            return
+        cmd = power_command(action)
+        if cmd:
+            run_power_command(cmd)
+
+    def apply_clipboard_setting(self) -> None:
+        on = str(QSettings().value("clipboard_watch", "false")).lower() == "true"
+        self.clip.set_enabled(on)
+        self.tray_clip.blockSignals(True)
+        self.tray_clip.setChecked(on)
+        self.tray_clip.blockSignals(False)
+
+    def _toggle_clipboard(self, on: bool) -> None:
+        QSettings().setValue("clipboard_watch", on)
+        self.apply_clipboard_setting()
+
+    def _on_clipboard_urls(self, urls: list) -> None:
+        """A copied address looks like a download: offer it (one address: Add dialog; several: Batch dialog)."""
+        known = {i.url.split("#", 1)[0] for i in self.mgr.items.values()}
+        urls = [u for u in urls if u.split("#", 1)[0] not in known]
+        if not urls:
+            return
+
+        def show():
+            self.show_raise()
+            if len(urls) == 1:
+                self.add_dialog(urls[0])
+            else:
+                self.batch_dialog("\n".join(urls))
+        QTimer.singleShot(0, show)
 
     def extension_dialog(self) -> None:
         d = ExtensionDialog(self)
@@ -1152,12 +1474,16 @@ class MainWindow(QMainWindow):
             s.setValue("max_active", d.active.value())
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
+            s.setValue("auto_retry", d.retry.isChecked())
+            s.setValue("max_retries", d.retries.value())
+            s.setValue("clipboard_watch", d.clip.isChecked())
             s.setValue("font_size", int(d.fontsize.currentData()))
             s.setValue("ui_style", d.style_box.currentData())
             s.setValue("ui_mode", d.mode_box.currentData())
             self.set_theme(d.style_box.currentData(), d.mode_box.currentData())
             self.set_font_size(int(d.fontsize.currentData()))
             apply_settings(self.mgr)
+            self.apply_clipboard_setting()
         else:
             self.set_font_size(original_font)          # cancelled: undo the live previews
             self.set_theme(*original_theme)
@@ -1179,7 +1505,7 @@ class MainWindow(QMainWindow):
             m.addAction("Open folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(it.directory)))
         m.addAction("Resume", lambda: self._each(self.mgr.resume))
         m.addAction("Pause", lambda: self._each(self.mgr.pause))
-        m.addAction("Copy URL", lambda: QGuiApplication.clipboard().setText(it.url))
+        m.addAction("Copy URL", lambda: (self.clip.remember(it.url), QGuiApplication.clipboard().setText(it.url)))
         m.addSeparator()
         m.addAction("Delete…", self.delete_selected)
         m.exec(self.table.viewport().mapToGlobal(pos))
@@ -1188,7 +1514,10 @@ class MainWindow(QMainWindow):
         its = self.mgr.items.values()
         active = [i for i in its if i.status == DOWNLOADING]
         total = sum(i.speed for i in active)
-        self.status.showMessage(f"{len(active)} active · {fmt_speed(total) or '0 B/s'} · {len(its)} total")
+        sched = ""
+        if self.mgr.schedule.enabled:
+            sched = " · scheduler: " + ("running" if self.mgr.gate_open else "waiting")
+        self.status.showMessage(f"{len(active)} active · {fmt_speed(total) or '0 B/s'} · {len(its)} total{sched}")
 
     def _notify_done(self, iid):
         it = self.mgr.items.get(iid)
@@ -1209,3 +1538,9 @@ def apply_settings(mgr: DownloadManager) -> None:
         except OSError:
             pass
     mgr.set_speed_limit(int(s.value("speed_limit_kb", 0)) * 1024)
+    mgr.auto_retry = str(s.value("auto_retry", "true")).lower() == "true"
+    mgr.max_retries = int(s.value("max_retries", 5))
+    sched = Schedule.from_settings({k: s.value(k) for k in ("sched_enabled", "sched_start", "sched_stop", "sched_days")
+                                    if s.contains(k)})
+    if sched != mgr.schedule:                       # only when it really changed: re-applying would reset a trigger
+        mgr.set_schedule(sched)

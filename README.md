@@ -10,6 +10,15 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Fast segmented downloads** — up to 32 connections, with *dynamic segment splitting*: a connection that finishes
   early takes over half of the largest remaining piece, so all connections stay busy to the end
 - **Pause / resume**, also across restarts (servers that support HTTP Range)
+- **Automatic retry** — temporary network or server problems (timeouts, resets, 5xx, 429) are retried after 15 s,
+  30 s, 1 min, 2 min, then every 5 min, up to a limit you choose; permanent errors (404, no space, …) are shown at once
+- **Batch downloads** — paste a list of addresses, or use ranges: `photo[01-20].jpg`, `file[1-100:5].zip`,
+  `part_[a-f].rar` (up to 10,000 per batch)
+- **Scheduler** — hold downloads and run them at night: either in a window (e.g. 23:00–06:00, selected days) or
+  released at a start time and run until finished; then optionally *quit / sleep / shut down* (with a 60-second
+  chance to cancel)
+- **Clipboard watcher** (off by default) — copy a link to a file or video and Warpdown offers to download it; on KDE
+  it reads Klipper over D-Bus, so it also works under Wayland while Warpdown sits in the tray
 - **Queue** with a configurable number of simultaneous downloads and a global speed limit
 - **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Images, Other — created automatically;
   files are sorted into them (file types are recognised from the name, `Content-Type` or the file's first bytes)

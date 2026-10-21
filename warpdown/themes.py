@@ -234,6 +234,18 @@ _ICONS = {
         'rx="2" fill="#2b8fc7"/><circle cx="5.2" cy="6" r=".9" fill="#fff"/><circle cx="8" cy="6" r=".9" fill="#fff"/>'
         '<path d="M8.5 13l-2 2 2 2M15.5 13l2 2-2 2" stroke="#fff" stroke-width="1.8" stroke-linecap="round" '
         'stroke-linejoin="round" fill="none"/>'),
+    "batch": (
+        '<path d="M4.5 7h11M4.5 12h11M4.5 17h6"/><path d="M18 14v6M15 17h6"/>',
+        '<rect x="3" y="5" width="13" height="3" rx="1.2" fill="#3daee9"/><rect x="3" y="10.5" width="13" height="3" '
+        'rx="1.2" fill="#3daee9"/><rect x="3" y="16" width="8" height="3" rx="1.2" fill="#3daee9"/>'
+        '<circle cx="17.5" cy="17.5" r="4.5" fill="#27ae60"/><path d="M17.5 15v5M15 17.5h5" stroke="#fff" '
+        'stroke-width="1.8" stroke-linecap="round"/>'),
+    "schedule": (
+        '<rect x="4" y="5" width="16" height="15" rx="2"/><path d="M4 10h16M8 3v4M16 3v4"/><path d="M12 13.2v2.4l1.7.9"/>',
+        '<rect x="3" y="4.5" width="18" height="16" rx="2.2" fill="#eef1f3" stroke="#aeb7bf"/>'
+        '<path d="M3 6.7a2.2 2.2 0 0 1 2.2-2.2h13.6A2.2 2.2 0 0 1 21 6.7V10H3z" fill="#da4453"/>'
+        '<path d="M8 3v3M16 3v3" stroke="#a8303c" stroke-width="1.8" stroke-linecap="round"/>'
+        '<path d="M12 12.5v3.2l2.2 1.2" stroke="#3daee9" stroke-width="1.8" stroke-linecap="round" fill="none"/>'),
     "images": (
         '<rect x="3.5" y="5" width="17" height="14" rx="2"/><circle cx="9" cy="10" r="1.6"/><path d="M4 17l5-5 4 4 3-3 4.5 4.5"/>',
         '<rect x="2.5" y="4" width="19" height="16" rx="2.2" fill="#27ae60"/><circle cx="8" cy="9" r="2" fill="#fcd34d"/>'

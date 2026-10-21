@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import threading
+from datetime import datetime
 from urllib.parse import urlsplit
 import time
 import uuid
@@ -13,15 +14,17 @@ from pathlib import Path
 
 from PySide6.QtCore import QObject, QTimer, Signal
 
+from . import retry as retrymod
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .inbox import Inbox
 from .hls import HlsDownloader
+from .scheduler import Schedule
 from .subtitles import fetch_subtitle, matches_langs, tag_for
 from .ytdlp import YtdlpDownloader
 from .util import category_for, data_dir, ensure_category_dirs, guess_extension, unique_path
 
-QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR = (
-    "Queued", "Connecting", "Downloading", "Paused", "Completed", "Error")
+QUEUED, PROBING, DOWNLOADING, PAUSED, COMPLETED, ERROR, RETRYING = (
+    "Queued", "Connecting", "Downloading", "Paused", "Completed", "Error", "Retrying")
 
 
 @dataclass
@@ -45,6 +48,9 @@ class Item:
     kind: str = "http"   # "http", "hls" or "ytdlp"
     opts: dict = field(default_factory=dict)   # yt-dlp options chosen in the dialog (quality, subtitles)
     prepared: bool = False   # destination folder/name already decided (yt-dlp items)
+    retries: int = 0         # automatic retries used so far (reset when the download succeeds or the user resumes it)
+    retry_at: float = 0.0    # when the next automatic retry happens (epoch seconds), while status == "Retrying"
+    held: bool = False       # paused by the scheduler (not by the user): resumed when the schedule allows it again
     sort: bool = False  # file into <directory>/<Category>/ once the file type is known
     headers: dict = field(default_factory=dict)  # referer, cookie, user-agent from the browser
 
@@ -79,6 +85,8 @@ def _subtitle_job(q, iid: str, tracks: list, headers: dict, video) -> None:
 
 class DownloadManager(QObject):
     changed = Signal(str)       # item id
+    queue_finished = Signal()   # everything that was running has finished (at least one download completed)
+    schedule_changed = Signal()  # the scheduler opened or closed the gate
     added = Signal(str)
     removed = Signal(str)
 
@@ -91,6 +99,13 @@ class DownloadManager(QObject):
         self.default_connections = 8
         self.sort_by_category = True
         self.sub_langs: list[str] = []   # wanted subtitle languages for auto-found tracks; [] = all
+        self.auto_retry = True           # retry failed downloads automatically (network problems only)
+        self.max_retries = 5
+        self.schedule = Schedule()       # when downloads may run
+        self._gate = True                # False while the scheduler holds downloads back
+        self._last_check = datetime.now()
+        self._phase_active = False       # something has been downloading since the queue was last idle
+        self._phase_completed = 0
         self._file = data_dir() / "downloads.json"
         # Worker threads talk to this object only through the inbox (plain data in a queue), never via Qt signals.
         self._inbox = Inbox({"finished": self._on_finished, "probed": self._on_probed, "subs": self._on_subs_done}, self)
@@ -106,7 +121,7 @@ class DownloadManager(QObject):
                 it = Item(**d)
                 if it.category == "General":   # renamed in 0.2
                     it.category = "Other"
-                if it.status in (DOWNLOADING, PROBING, QUEUED):
+                if it.status in (DOWNLOADING, PROBING, QUEUED, RETRYING):
                     it.status = PAUSED
                 it.speed = 0.0
                 self.items[it.id] = it
@@ -162,14 +177,14 @@ class DownloadManager(QObject):
         eng = self.engines.get(iid)
         if eng:
             eng.stop(wait=False)
-        it.status, it.speed = PAUSED, 0.0
+        it.status, it.speed, it.held = PAUSED, 0.0, False      # a pause by the user is never undone by the scheduler
         self.changed.emit(iid)
         self.save()
 
     def resume(self, iid: str) -> None:
         it = self.items.get(iid)
-        if it and it.status in (PAUSED, ERROR):
-            it.status, it.error = QUEUED, ""
+        if it and it.status in (PAUSED, ERROR, RETRYING):
+            it.status, it.error, it.held, it.retries, it.retry_at = QUEUED, "", False, 0, 0.0
             self.changed.emit(iid)
             self._schedule()
 
@@ -197,7 +212,7 @@ class DownloadManager(QObject):
         for eng in list(self.engines.values()):
             eng.stop(wait=True)
         for it in self.items.values():
-            if it.status in (DOWNLOADING, PROBING, QUEUED):
+            if it.status in (DOWNLOADING, PROBING, QUEUED, RETRYING):
                 it.status = PAUSED
         self.save()
 
@@ -206,6 +221,8 @@ class DownloadManager(QObject):
         return sum(1 for i in self.items.values() if i.status in (DOWNLOADING, PROBING))
 
     def _schedule(self) -> None:
+        if not self._gate:
+            return
         for it in sorted(self.items.values(), key=lambda i: i.added):
             if self._active_count() >= self.max_active:
                 break
@@ -249,7 +266,7 @@ class DownloadManager(QObject):
         if not it or it.status != PROBING:
             return
         if res is None:
-            it.status, it.error = ERROR, err
+            self._fail(it, err)
             self.changed.emit(iid)
             self._schedule()
             return
@@ -284,6 +301,7 @@ class DownloadManager(QObject):
         cls = {"hls": HlsDownloader, "ytdlp": YtdlpDownloader}.get(it.kind, Downloader)
         eng = cls(job, self.limiter, on_finish=lambda d, i=it.id, q=self._inbox.queue: q.put(("finished", (i, d))))
         self.engines[it.id] = eng
+        self._phase_active = True
         it.status = DOWNLOADING
         self.changed.emit(it.id)
         eng.start()
@@ -294,7 +312,9 @@ class DownloadManager(QObject):
         it = self.items.get(iid)
         if not it:
             return
-        if it.status == PAUSED and not eng.done:
+        if not eng.done and not eng.error and it.status != DOWNLOADING:
+            # The engine stopped because of a pause/hold. If the item was resumed meanwhile it is QUEUED again and
+            # must simply be started afresh (never flipped back to "Paused" by this late message).
             self._schedule()
             return
         it.speed = 0.0
@@ -303,17 +323,19 @@ class DownloadManager(QObject):
                 it.filename, it.size = eng.job.dest.name, eng.downloaded()
                 it.category = category_for(it.filename)
             it.status, it.downloaded = COMPLETED, max(it.size, it.downloaded)
+            it.retries, self._phase_completed = 0, self._phase_completed + 1
             if it.kind == "ytdlp":
                 it.sub_files = list(eng.sub_files)    # yt-dlp already saved them next to the video
             else:
                 self._start_subtitles(it, getattr(eng, "sub_tracks", []))
         elif eng.error:
-            it.status, it.error = ERROR, eng.error
+            self._fail(it, eng.error)
         else:
             it.status = PAUSED
         self.changed.emit(iid)
         self.save()
         self._schedule()
+        self._check_queue_finished()
 
     def _start_subtitles(self, it: Item, found: list) -> None:
         tracks, seen = [], set()
@@ -334,7 +356,93 @@ class DownloadManager(QObject):
             self.changed.emit(iid)
             self.save()
 
+    # ---- automatic retry ----------------------------------------------
+    def _fail(self, it: Item, error: str) -> None:
+        """A download failed: wait and try again if it looks like a temporary problem, else show the error."""
+        if self.auto_retry and it.retries < self.max_retries and retrymod.is_transient(error):
+            it.retries += 1
+            it.retry_at = time.time() + retrymod.delay_for(it.retries)
+            it.status, it.error = RETRYING, error
+        else:
+            it.status, it.error = ERROR, error
+
+    # ---- the scheduler --------------------------------------------------
+    @property
+    def gate_open(self) -> bool:
+        return self._gate
+
+    def set_schedule(self, schedule: Schedule) -> None:
+        self.schedule = schedule
+        self._update_gate(datetime.now(), force=True)
+
+    def _update_gate(self, now: datetime, force: bool = False) -> None:
+        """Open or close the gate according to the schedule, holding or releasing downloads as it changes."""
+        s = self.schedule
+        prev, self._last_check = self._last_check, now
+        if force:
+            prev = now                               # (re)configured: don't react to start times in the past
+        if not s.enabled:
+            new = True
+        elif s.window_mode:
+            new = bool(s.gate(now))
+        else:                                        # trigger mode: opens at the start time, closes when finished
+            new = False if force else self._gate
+            if s.start_due(prev, now):
+                new = True
+        if new == self._gate:
+            return
+        self._gate = new
+        if new:
+            self._release_held()
+        else:
+            self._hold_active()
+        self.schedule_changed.emit()
+
+    def _hold_active(self) -> None:
+        for it in self.items.values():
+            if it.status in (DOWNLOADING, PROBING):
+                eng = self.engines.get(it.id)
+                if eng:
+                    eng.stop(wait=False)
+                it.status, it.speed, it.held = PAUSED, 0.0, True
+                self.changed.emit(it.id)
+        self.save()
+
+    def _release_held(self) -> None:
+        for it in self.items.values():
+            if it.held:
+                it.status, it.held = QUEUED, False
+                self.changed.emit(it.id)
+        self._schedule()
+
+    def _check_queue_finished(self) -> None:
+        """Emit queue_finished once, when the last running download is done and nothing is waiting."""
+        busy = any(i.status in (DOWNLOADING, PROBING) for i in self.items.values())
+        waiting = any(i.status in (QUEUED, RETRYING) or i.held for i in self.items.values())
+        if busy:
+            self._phase_active = True
+            return
+        if waiting or not self._phase_active:
+            return
+        completed, self._phase_active, self._phase_completed = self._phase_completed, False, 0
+        if self.schedule.enabled and not self.schedule.window_mode and self._gate:
+            self._gate = False                       # trigger mode: closed again until the next start time
+            self.schedule_changed.emit()
+        if completed:
+            self.queue_finished.emit()
+
     def _tick(self) -> None:
+        now = time.time()
+        promoted = False
+        for it in self.items.values():
+            if it.status == RETRYING:
+                if it.retry_at <= now:
+                    it.status, promoted = QUEUED, True
+                self.changed.emit(it.id)            # also refreshes the "retrying in 30 s" countdown
+        self._update_gate(datetime.now())
+        if promoted:
+            self._schedule()
+        self._check_queue_finished()
         for iid, eng in list(self.engines.items()):
             it = self.items.get(iid)
             if it and it.status == DOWNLOADING:
