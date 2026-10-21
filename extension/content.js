@@ -12,14 +12,20 @@
       .btn{font:600 12px system-ui,sans-serif;color:#fff;background:#1d7fe0;border:0;border-radius:6px;
            padding:6px 10px;cursor:pointer;box-shadow:0 2px 8px #0008;white-space:nowrap}
       .btn:hover{background:#3b97f5}
-      .btn.compact{padding:6px 9px;font-size:14px;line-height:1}
+      .btn.compact{padding:6px 7px;line-height:1}
+      .btn svg{display:inline-block}
       .menu{margin-top:4px;background:#222;color:#eee;border-radius:6px;font:12px system-ui,sans-serif;
             box-shadow:0 2px 10px #000a;max-width:340px;overflow:hidden}
       .menu div{padding:6px 10px;cursor:pointer;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
       .menu div:hover{background:#1d7fe0}
       .msg{padding:6px 10px}
     </style>
-    <button class="btn">⬇ Download this video</button><div class="menu" hidden></div>`;
+    <button class="btn"></button><div class="menu" hidden></div>`;
+  // Warpdown mark: tunnel rings + down arrow (same artwork as the app icon, drawn without its tile)
+  const MARK = `<svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" style="vertical-align:-3px">
+    <circle cx="12" cy="12" r="10.5" fill="none" stroke="#fff" stroke-width="1.6" opacity=".35"/>
+    <circle cx="12" cy="12" r="7.5" fill="none" stroke="#fff" stroke-width="1.8" opacity=".65"/>
+    <path d="M10.4 7 h3.2 v5 h2.4 L12 17 L8 12 h2.4 z" fill="#fff"/></svg>`;
   const btn = root.querySelector(".btn");
   const menu = root.querySelector(".menu");
   let current = null, hideTimer = null, overHost = false, style = "full";
@@ -28,7 +34,7 @@
   function applyStyle(s) {
     style = ["full", "compact", "hidden"].includes(s) ? s : "full";
     btn.className = "btn" + (style === "compact" ? " compact" : "");
-    btn.textContent = style === "compact" ? "⬇" : "⬇ Download this video";
+    btn.innerHTML = style === "compact" ? MARK : MARK + " Download this video";
     btn.title = "Download this video";
     if (style === "hidden") hide(); else if (host.style.display === "block") place();
   }

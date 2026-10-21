@@ -206,6 +206,7 @@ class Model(QAbstractTableModel):
         return None
 
 
+from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
 
@@ -1170,7 +1171,7 @@ class MainWindow(QMainWindow):
         mgr.removed.connect(self._update_status)
         self._update_status()
 
-        self.tray = QSystemTrayIcon(QIcon.fromTheme("folder-download", st.standardIcon(QStyle.SP_ArrowDown)), self)
+        self.tray = QSystemTrayIcon(app_icon(), self)
         tm = QMenu()
         tm.addAction("Show", self.show_raise)
         tm.addAction("Add URL…", self.add_dialog)

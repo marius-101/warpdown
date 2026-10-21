@@ -61,14 +61,15 @@ JSON
   echo "Flatpak Firefox detected. Also run once:  flatpak override --user --talk-name=org.freedesktop.Flatpak org.mozilla.firefox"
 fi
 
-mkdir -p "$HOME/.local/share/applications"
+mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
+cp "$ROOT/warpdown/assets/warpdown.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/warpdown.svg"
 cat > "$HOME/.local/share/applications/warpdown.desktop" <<DESK
 [Desktop Entry]
 Type=Application
 Name=Warpdown Download Manager
 Comment=IDM-style download manager
 Exec=env PYTHONPATH=$ROOT $PY -m warpdown %u
-Icon=folder-download
+Icon=warpdown
 Categories=Network;FileTransfer;
 MimeType=x-scheme-handler/magnet;
 Terminal=false

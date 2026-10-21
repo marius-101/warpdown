@@ -9,6 +9,7 @@ import sys
 from PySide6.QtCore import QSettings, QTimer
 from PySide6.QtWidgets import QApplication
 
+from .app_icon import app_icon
 from . import ipc
 from . import themes
 from .inbox import Inbox
@@ -50,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     app.setApplicationName("warpdown")
     app.setOrganizationName("warpdown")
+    app.setDesktopFileName("warpdown")
+    app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
     apply_font(saved_font_size())          # text size chosen in Settings (0 = system default)
     themes.apply_theme(*saved_theme())    # style + mode chosen in Settings
