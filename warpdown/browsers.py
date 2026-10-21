@@ -13,7 +13,9 @@ from .util import data_dir
 
 PROJECT_URL = "https://github.com/marius-101/warpdown"
 # Fill these in once the extension is published in the browser stores; the dialog then shows install buttons.
-FIREFOX_ADDON_URL = ""      # e.g. https://addons.mozilla.org/firefox/addon/warpdown/
+FIREFOX_ADDON_URL = ""      # e.g. https://addons.mozilla.org/firefox/addon/warpdown/ (set if a public listing is added)
+# The Mozilla-signed add-on, attached to every GitHub release as "warpdown.xpi" (Firefox offers to install it).
+FIREFOX_XPI_URL = PROJECT_URL + "/releases/latest/download/warpdown.xpi"
 CHROME_STORE_URL = ""       # e.g. https://chromewebstore.google.com/detail/...
 HOST_NAME = "org.warpdown.host"
 

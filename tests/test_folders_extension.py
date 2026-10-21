@@ -145,6 +145,9 @@ def test_extension_dialog_actions(qapp, monkeypatch):
     monkeypatch.setattr(browsers, "open_in_browser", lambda cmd, url: calls.setdefault("open", []).append((cmd, url)) or True)
     monkeypatch.setattr(browsers, "run_installer", lambda cid="": calls.setdefault("install", []).append(cid) or (True, "ok"))
     d = gui.ExtensionDialog()
+    d.btn_ff_install.click()                                                      # the one-click, signed install
+    assert calls["open"] == [(["ff"], browsers.FIREFOX_XPI_URL)]
+    calls["open"].clear()
     d.btn_ff.click(); d.btn_ch.click()
     assert calls["open"] == [(["ff"], "about:debugging#/runtime/this-firefox"), (["ch"], "chrome://extensions")]
 
@@ -160,6 +163,12 @@ def test_extension_dialog_actions(qapp, monkeypatch):
     monkeypatch.setattr(browsers, "firefox_command", lambda: None)
     d.btn_ff.click()
     assert "wasn't found" in d.result.text()
+    d.btn_ff_install.click()
+    assert "wasn't found" in d.result.text()
+
+
+def test_signed_addon_url_points_at_the_latest_release_asset():
+    assert browsers.FIREFOX_XPI_URL == "https://github.com/marius-101/warpdown/releases/latest/download/warpdown.xpi"
 
 
 # ---------------- Firefox add-on package ----------------

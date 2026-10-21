@@ -49,11 +49,16 @@ For **full YouTube quality** also install a JavaScript runtime: `sudo apt instal
 ```bash
 native/install.sh        # registers the native-messaging host and a desktop launcher
 ```
-**Firefox**
-1. `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…* → pick **`dist/warpdown.xpi`**
-   (build it first with `native/build_xpi.sh`). A temporary add-on has to be loaded again after Firefox restarts.
-2. Click the Warpdown toolbar icon; if it shows a yellow notice, press **Grant access** (needed for the video button).
+**Firefox** (Mozilla-signed, stays installed across restarts)
+1. Open **[warpdown.xpi](https://github.com/marius-101/warpdown/releases/latest/download/warpdown.xpi)** in Firefox
+   (or press *Browser → Install the Firefox add-on* inside Warpdown). Choose **Allow**, then **Add**.
+   If Firefox saves the file instead, open it with *File → Open File*.
+2. Click the Warpdown toolbar icon and, if it shows a yellow notice, press **Grant access**
+   (needed for the video button).
 3. *Flatpak Firefox?* The installer prints one extra command to allow the native host; run it and restart Firefox.
+
+*Developers:* to test a build from source, run `native/build_xpi.sh` and load `dist/warpdown.xpi` from
+`about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…*.
 
 **Chrome / Chromium / Brave** — load the `extension/` folder unpacked, copy the extension ID, then run
 `WARPDOWN_CHROME_EXTENSION_ID=<id> native/install.sh`.

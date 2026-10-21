@@ -464,25 +464,34 @@ class ExtensionDialog(QDialog):
         # ---- Firefox ----
         ff = QGroupBox("Firefox")
         fl = QVBoxLayout(ff)
-        steps = QLabel("1. Press <b>Open Firefox add-on page</b>.<br>"
-                       "2. There, press <b>Load Temporary Add-on…</b> and choose <b>warpdown.xpi</b> "
-                       "(<i>Show extension file</i> opens its folder).<br>"
-                       "3. Click the Warpdown toolbar icon and press <b>Grant access</b>.<br>"
-                       "<small>Until the add-on is published on addons.mozilla.org, Firefox forgets temporary "
-                       "add-ons when it restarts.</small>")
+        steps = QLabel("1. Press <b>Install the Firefox add-on</b>. Firefox asks for permission: choose "
+                       "<b>Allow</b>, then <b>Add</b>.<br>"
+                       "2. Click the Warpdown toolbar icon and press <b>Grant access</b>.<br>"
+                       "<small>The add-on is signed by Mozilla, so it stays installed after Firefox restarts. If "
+                       "Firefox saves the file instead of installing it, open it with "
+                       "<i>File → Open File</i>.</small>")
         steps.setWordWrap(True)
         fl.addWidget(steps)
         row = QHBoxLayout()
-        self.btn_ff = QPushButton("Open Firefox add-on page")
-        self.btn_ff.clicked.connect(self._open_firefox)
-        self.btn_xpi = QPushButton("Show extension file")
-        self.btn_xpi.clicked.connect(self._show_xpi)
-        row.addWidget(self.btn_ff); row.addWidget(self.btn_xpi)
+        self.btn_ff_install = QPushButton("Install the Firefox add-on")
+        self.btn_ff_install.clicked.connect(self._install_firefox)
+        row.addWidget(self.btn_ff_install)
         if browsers.FIREFOX_ADDON_URL:
             b = QPushButton("Install from addons.mozilla.org")
             b.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(browsers.FIREFOX_ADDON_URL)))
             row.addWidget(b)
         row.addStretch(1)
+        fl.addLayout(row)
+        dev = QLabel("<small><b>Developers:</b> to test a build from source, load it as a temporary add-on "
+                     "(forgotten when Firefox restarts).</small>")
+        dev.setWordWrap(True)
+        fl.addWidget(dev)
+        row = QHBoxLayout()
+        self.btn_ff = QPushButton("Open Firefox debugging page")
+        self.btn_ff.clicked.connect(self._open_firefox)
+        self.btn_xpi = QPushButton("Show extension file")
+        self.btn_xpi.clicked.connect(self._show_xpi)
+        row.addWidget(self.btn_ff); row.addWidget(self.btn_xpi); row.addStretch(1)
         fl.addLayout(row)
         lay.addWidget(ff)
 
@@ -552,12 +561,20 @@ class ExtensionDialog(QDialog):
     def _say(self, text: str) -> None:
         self.result.setText(text)
 
+    def _install_firefox(self) -> None:
+        cmd = browsers.firefox_command()
+        if cmd is None:
+            return self._say("Firefox wasn't found on this computer.")
+        ok = browsers.open_in_browser(cmd, browsers.FIREFOX_XPI_URL)
+        self._say("Asked Firefox to install the add-on. Allow it, then press Add." if ok else
+                  "Couldn't start Firefox.")
+
     def _open_firefox(self) -> None:
         cmd = browsers.firefox_command()
         if cmd is None:
             return self._say("Firefox wasn't found on this computer.")
         ok = browsers.open_in_browser(cmd, "about:debugging#/runtime/this-firefox")
-        self._say("Opened Firefox's add-on page." if ok else "Couldn't start Firefox.")
+        self._say("Opened Firefox's add-on debugging page." if ok else "Couldn't start Firefox.")
 
     def _open_chrome(self) -> None:
         cmd = browsers.chromium_command()
