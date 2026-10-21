@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+import threading
 from pathlib import Path
 
 IS_WINDOWS = sys.platform.startswith("win")
@@ -39,3 +40,22 @@ def helper(name: str) -> str | None:
 
 if FROZEN:                                            # let every `which("ffmpeg")` find the bundled helpers
     os.environ["PATH"] = str(app_dir()) + os.pathsep + os.environ.get("PATH", "")
+
+
+_WRITE_LOCK = threading.Lock()
+
+
+def pwrite(fd: int, data: bytes, offset: int) -> int:
+    """Write `data` at `offset` without moving anything for other threads. Windows has no os.pwrite, so there the
+    seek and the write happen together under a lock (many download segments share one file)."""
+    if hasattr(os, "pwrite"):
+        return os.pwrite(fd, data, offset)
+    with _WRITE_LOCK:
+        os.lseek(fd, offset, os.SEEK_SET)
+        view, done = memoryview(data), 0
+        while done < len(view):
+            done += os.write(fd, view[done:])
+    return len(data)
+
+
+OPEN_FLAGS = os.O_RDWR | os.O_CREAT | getattr(os, "O_BINARY", 0)      # Windows must not translate line endings

@@ -20,6 +20,7 @@ import httpx
 
 from urllib.parse import urlsplit
 
+from . import osutil
 from .util import filename_from_headers, guess_extension
 
 CHUNK = 64 * 1024
@@ -219,7 +220,7 @@ class Downloader:
             job.dest.parent.mkdir(parents=True, exist_ok=True)
             self._init_segments()
             fresh = not self.part.exists()
-            self._fd = os.open(self.part, os.O_RDWR | os.O_CREAT, 0o644)
+            self._fd = os.open(self.part, osutil.OPEN_FLAGS, 0o644)
             if fresh and job.size > 0:
                 os.ftruncate(self._fd, job.size)
             nthreads = len(self.segments) if job.resumable else 1
@@ -317,7 +318,7 @@ class Downloader:
                         n = min(len(chunk), seg.end - seg.pos)
                         if n <= 0:
                             return
-                        os.pwrite(self._fd, chunk[:n], seg.pos)
+                        osutil.pwrite(self._fd, chunk[:n], seg.pos)
                         seg.pos += n
                         self.limiter.acquire(n)
                         if seg.pos >= seg.end:
