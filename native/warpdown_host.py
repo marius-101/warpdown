@@ -45,7 +45,7 @@ def main():
             app = osutil.helper("warpdown")                      # the installed Windows program, or Python from source
             subprocess.Popen([app] if app else [sys.executable, "-m", "warpdown"],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.detached())
-            for _ in range(180):                                  # a cold start can take a while (slow disks, virtual machines)
+            for _ in range(40):                                   # up to 20 s for a cold start (slow disks, virtual machines)
                 time.sleep(0.5)
                 if ipc.send(msg):
                     ok = True
