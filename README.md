@@ -59,10 +59,20 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Themes** — pick a *Style* (System default, Kubuntu, Windows 11) and a *Mode* (Follow system, Light, Dark) in
   Settings; each style has its own colours, shapes and icon set, with a live preview
 - **Adjustable text size** — *Settings → Text size* (live preview), or `Ctrl +` / `Ctrl -` / `Ctrl 0` in the main window
-- Tray icon, completion notifications, pure Python + Qt (PySide6) — no aria2 or other daemons needed
+- Tray icon, completion notifications, pure Python + Qt (PySide6). aria2 is only needed for torrents
 
 ### Themes
 ![Warpdown themes: Kubuntu and Windows 11, light and dark](docs/themes.png)
+
+## Install on Windows 10 / 11
+1. Download **`warpdown-setup-<version>.exe`** from the [latest release](https://github.com/marius-101/warpdown/releases/latest)
+   (or the portable `.zip`, which needs no installation).
+2. Run it. The installer is not code-signed yet, so Windows SmartScreen may say *"Windows protected your PC"*:
+   click **More info → Run anyway**. It installs for your user only (no administrator rights).
+3. Start Warpdown, then press **Browser** in the toolbar to add the Firefox add-on (or Chrome/Edge/Brave).
+
+The Windows program includes yt-dlp, ffmpeg and aria2, so video sites, merging and torrents work out of the box.
+It is built and smoke-tested automatically on a Windows machine (GitHub Actions) for every change.
 
 ## Install (Kubuntu / Ubuntu / Debian)
 ```bash
