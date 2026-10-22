@@ -27,6 +27,8 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Checksum verification** — paste a SHA-256 / SHA-512 / SHA-1 / MD5 checksum (*right-click → Verify checksum…*) and
   get a ✓ or ✗; Warpdown also looks for a published `NAME.sha256` (etc.) next to a downloaded file and checks it
   automatically (can be turned off in Settings)
+- **Drag and drop** — drop `.torrent` files, magnet links or web addresses on the window; *Add URL* also has a
+  *Torrent file…* button. *Settings → Start Warpdown when I log in* keeps it in the tray so browser hand-offs are instant
 - **Torrents and magnet links** — `magnet:` links, `.torrent` addresses and `.torrent` files, downloaded with
   [aria2](https://aria2.github.io) (`sudo apt install aria2`; on Windows put `aria2c.exe` next to Warpdown or in your
   PATH). Warpdown registers as the handler for magnet links and does not seed after finishing

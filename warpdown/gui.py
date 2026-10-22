@@ -257,7 +257,7 @@ class Model(QAbstractTableModel):
         return None
 
 
-from . import osutil, torrent
+from . import autostart, clipwatch, osutil, torrent
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -332,7 +332,13 @@ class AddDialog(QDialog):
         outer = QVBoxLayout(self)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        form.addRow("URL:", self.url)
+        pick = QPushButton("Torrent file…")
+        pick.setToolTip("Choose a .torrent file from this computer")
+        pick.clicked.connect(self._choose_torrent)
+        url_row = QHBoxLayout()
+        url_row.addWidget(self.url, 1)
+        url_row.addWidget(pick)
+        form.addRow("URL:", url_row)
         form.addRow("", self.info)
         form.addRow("Save as:", self.name)
         form.addRow("Save to:", row)
@@ -366,6 +372,14 @@ class AddDialog(QDialog):
         if use_ytdlp and ytdlp.available():
             self._set_ytdlp(True)
         if url:
+            self._probe()
+
+    def _choose_torrent(self) -> None:
+        path, _ = QFileDialog.getOpenFileName(self, "Choose a torrent file", str(Path.home()),
+                                              "Torrent files (*.torrent);;All files (*)")
+        if path:
+            self.url.setText(path)
+            self._set_ytdlp(False)
             self._probe()
 
     # ---- yt-dlp mode ----
@@ -1080,6 +1094,9 @@ class SettingsDialog(QDialog):
         self.vpn.setChecked(str(s.value("require_vpn", "false")).lower() == "true")
         self.vpn.setToolTip("Looks for a VPN network connection (WireGuard, OpenVPN, ProtonVPN, Mullvad, Tailscale …). "
                             "Downloads stop at once when it drops and continue when it is back.")
+        self.autostart = QCheckBox("Start Warpdown when I log in (minimized to the tray)")
+        self.autostart.setChecked(autostart.is_enabled())
+        self.autostart.setToolTip("Browser downloads then reach Warpdown instantly, without waiting for it to start.")
         self.sums = QCheckBox("Look for a published checksum next to downloaded files and verify it")
         self.sums.setChecked(str(s.value("find_checksums", "true")).lower() == "true")
         self.retry = QCheckBox("Retry failed downloads automatically (temporary network or server problems)")
@@ -1123,6 +1140,7 @@ class SettingsDialog(QDialog):
         form.addRow("", lrow)
         form.addRow("", self.vpn)
         form.addRow("", self.sums)
+        form.addRow("", self.autostart)
         form.addRow("", self.retry)
         form.addRow("Maximum retries:", self.retries)
         form.addRow("", self.clip)
@@ -1235,6 +1253,7 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.mgr = mgr
         self.setWindowTitle(f"Warpdown — fast download manager {__version__}")
+        self.setAcceptDrops(True)
         self.resize(1200, 620)
         self.model = Model(mgr)
         self.table = QTableView()
@@ -1566,6 +1585,45 @@ class MainWindow(QMainWindow):
         tb.addAction(a)
         return a
 
+    # ---- drag and drop: .torrent files, magnet links and web addresses dropped on the window ----
+    def dragEnterEvent(self, e):
+        md = e.mimeData()
+        if md.hasUrls() or md.hasText():
+            e.acceptProposedAction()
+
+    dragMoveEvent = dragEnterEvent
+
+    def dropEvent(self, e):
+        files, links = self.dropped_items(e.mimeData())
+        e.acceptProposedAction()
+        QTimer.singleShot(0, lambda: self.handle_dropped(files, links))      # not from inside the drop event
+
+    @staticmethod
+    def dropped_items(md) -> tuple[list[str], list[str]]:
+        files, links = [], []
+        for u in md.urls():
+            if u.isLocalFile():
+                p = u.toLocalFile()
+                if p.lower().endswith(".torrent"):
+                    files.append(p)
+            elif u.scheme() in ("http", "https", "ftp", "magnet"):
+                links.append(u.toString())
+        if not files and not links and md.hasText():
+            links = clipwatch.pick(md.text()) or [l.strip() for l in md.text().splitlines()
+                                                  if l.strip().startswith(("http://", "https://", "magnet:"))]
+        return files, list(dict.fromkeys(links))
+
+    def handle_dropped(self, files: list[str], links: list[str]) -> None:
+        if files:
+            folder = str(QSettings().value("download_dir", str(default_download_dir())))
+            for f in files:
+                self.mgr.add(f, folder, kind="torrent")
+            self.status.showMessage(f"Added {len(files)} torrent file{'s' if len(files) != 1 else ''}", 6000)
+        if len(links) == 1:
+            self.add_dialog(links[0])
+        elif links:
+            self.batch_dialog("\n".join(links))
+
     def show_raise(self):
         self.show(); self.raise_(); self.activateWindow()
 
@@ -1712,6 +1770,10 @@ class MainWindow(QMainWindow):
             s.setValue("limit_sched_to", d.lto.time().toString("HH:mm"))
             s.setValue("require_vpn", d.vpn.isChecked())
             s.setValue("find_checksums", d.sums.isChecked())
+            try:
+                autostart.set_enabled(d.autostart.isChecked())
+            except OSError as e:
+                self.status.showMessage(f"Could not change the start-at-login setting: {e}", 8000)
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
             s.setValue("auto_retry", d.retry.isChecked())

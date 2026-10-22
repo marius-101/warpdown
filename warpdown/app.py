@@ -7,7 +7,7 @@ import os
 import sys
 
 from PySide6.QtCore import QSettings, QTimer
-from PySide6.QtWidgets import QApplication
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon
 
 from .app_icon import app_icon
 from . import browsers, ipc, osutil
@@ -24,6 +24,8 @@ _CRASH_LOG = None     # kept open for the life of the process
 def dispatch(win: MainWindow, msg: dict) -> None:
     """What to do with a message from the browser extension (or a second Warpdown start)."""
     action = msg.get("action")
+    if action == "ping":
+        return
     win.show_raise()
     if action == "add" and msg.get("url"):
         win.add_dialog(msg["url"], msg.get("headers"), msg.get("filename", ""), msg.get("subs"), msg.get("mode", ""))
@@ -36,8 +38,9 @@ def main(argv: list[str] | None = None) -> int:
     urls = [a for a in argv[1:] if a.startswith(("http://", "https://", "ftp://", "magnet:"))
             or (a.lower().endswith(".torrent") and os.path.isfile(a))]
 
+    background = "--background" in argv            # started at login: stay in the tray, no window
     # Already running? Hand the URLs over (or just raise the window) and exit. No Qt needed for this.
-    if ipc.send({"action": "add", "url": urls[0]} if urls else {"action": "show"}):
+    if ipc.send({"action": "add", "url": urls[0]} if urls else {"action": "ping" if background else "show"}):
         for u in urls[1:]:
             ipc.send({"action": "add", "url": u})
         return 0
@@ -81,7 +84,8 @@ def main(argv: list[str] | None = None) -> int:
     app.aboutToQuit.connect(server.close)
     if os.environ.get("WARPDOWN_QUIT_AFTER_MS"):           # test hook: lets a test start the real app and watch it exit
         QTimer.singleShot(int(os.environ["WARPDOWN_QUIT_AFTER_MS"]), app.quit)
-    win.show()
+    if not (background and QSystemTrayIcon.isSystemTrayAvailable()):
+        win.show()
     for u in urls:
         win.add_dialog(u)
     return app.exec()

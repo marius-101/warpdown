@@ -38,6 +38,10 @@ Root: HKCU; Subkey: "Software\Mozilla\NativeMessagingHosts\org.warpdown.host"; F
 Root: HKCU; Subkey: "Software\Google\Chrome\NativeMessagingHosts\org.warpdown.host"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\Microsoft\Edge\NativeMessagingHosts\org.warpdown.host"; Flags: uninsdeletekey
 Root: HKCU; Subkey: "Software\BraveSoftware\Brave-Browser\NativeMessagingHosts\org.warpdown.host"; Flags: uninsdeletekey
+; .torrent files: Warpdown appears in "Open with" (it does not take over the default)
+Root: HKCU; Subkey: "Software\Classes\Warpdown.torrent"; ValueType: string; ValueData: "Torrent file"; Flags: uninsdeletekey
+Root: HKCU; Subkey: "Software\Classes\Warpdown.torrent\shell\open\command"; ValueType: string; ValueData: """{app}\warpdown.exe"" ""%1"""
+Root: HKCU; Subkey: "Software\Classes\.torrent\OpenWithProgids"; ValueType: string; ValueName: "Warpdown.torrent"; ValueData: ""; Flags: uninsdeletevalue
 Root: HKCU; Subkey: "Software\Classes\magnet"; ValueType: string; ValueData: "URL:Magnet link"; Flags: uninsdeletekey; Tasks: magnet
 Root: HKCU; Subkey: "Software\Classes\magnet"; ValueName: "URL Protocol"; ValueType: string; ValueData: ""; Tasks: magnet
 Root: HKCU; Subkey: "Software\Classes\magnet\shell\open\command"; ValueType: string; ValueData: """{app}\warpdown.exe"" ""%1"""; Tasks: magnet

@@ -410,3 +410,69 @@ def test_torrent_survives_aria2_not_answering_for_a_moment(tmp_path):
     eng.start()
     assert finished.wait(30)
     assert eng.done and not eng.error and Flaky.failures == 0
+
+
+# ---------------------------------------------------------------- drag and drop, torrent files, start at login
+def test_dropping_torrent_files_and_links(m, qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
+    from PySide6.QtGui import QDropEvent
+    from warpdown import gui
+    QSettings().setValue("download_dir", str(tmp_path / "dl"))
+    win = gui.MainWindow(m)
+    try:
+        assert win.acceptDrops()
+        t = tmp_path / "a.torrent"
+        t.write_bytes(b"d4:infod4:name1:xee")
+        (tmp_path / "doc.txt").write_text("not a torrent")
+        added = []
+        monkeypatch.setattr(win, "add_dialog", lambda u, *a, **k: added.append(("one", u)))
+        monkeypatch.setattr(win, "batch_dialog", lambda text="": added.append(("many", text)))
+
+        md = QMimeData()
+        md.setUrls([QUrl.fromLocalFile(str(t)), QUrl.fromLocalFile(str(tmp_path / "doc.txt"))])
+        ev = QDropEvent(QPointF(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier)
+        win.dropEvent(ev)
+        assert ev.isAccepted()
+        pump(qapp, 0.2)
+        kinds = [(i.kind, i.url) for i in m.items.values()]
+        assert kinds == [("torrent", str(t))] and added == []              # the text file is ignored
+
+        files, links = win.dropped_items(_mime(text=MAGNET))               # a magnet link dragged as text
+        assert files == [] and links == [MAGNET]
+        win.handle_dropped([], links)
+        win.handle_dropped([], ["http://x/a.zip", "http://x/b.zip"])
+        assert added == [("one", MAGNET), ("many", "http://x/a.zip\nhttp://x/b.zip")]
+    finally:
+        win.close()
+        win.deleteLater()
+
+
+def _mime(text="", urls=()):
+    from PySide6.QtCore import QMimeData, QUrl
+    md = QMimeData()
+    if text:
+        md.setText(text)
+    if urls:
+        md.setUrls([QUrl(u) for u in urls])
+    return md
+
+
+def test_torrent_file_path_is_a_torrent_source(m, tmp_path):
+    t = tmp_path / "x.torrent"
+    t.write_bytes(b"x")
+    it = m.add(str(t), str(tmp_path), start=False)
+    assert it.kind == "torrent"
+
+
+def test_start_at_login_file_on_linux(tmp_path, monkeypatch):
+    import sys
+    from warpdown import autostart
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path))
+    if sys.platform.startswith("win"):
+        pytest.skip("uses the registry on Windows")
+    assert not autostart.is_enabled()
+    autostart.set_enabled(True)
+    text = (tmp_path / "autostart" / "warpdown.desktop").read_text()
+    assert autostart.is_enabled() and "--background" in text and "Exec=" in text
+    autostart.set_enabled(False)
+    assert not autostart.is_enabled()
