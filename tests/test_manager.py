@@ -1,3 +1,4 @@
+import sys
 import os
 import time
 
@@ -63,7 +64,8 @@ def test_extension_guessing_and_sorting(qapp, tmp_path, monkeypatch):
         qapp.processEvents()
         time.sleep(0.05)
     assert it.status == COMPLETED, (it.status, it.error)
-    assert (tmp_path / "Video" / "Example Site - Some Title : Episode 1.mp4").exists()
+    expected = "Example Site - Some Title _ Episode 1.mp4" if sys.platform.startswith("win") else "Example Site - Some Title : Episode 1.mp4"
+    assert (tmp_path / "Video" / expected).exists()               # Windows cannot have ":" in a file name
     m.shutdown()
     srv.shutdown()
 
