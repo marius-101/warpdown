@@ -1603,7 +1603,7 @@ class MainWindow(QMainWindow):
         files, links = [], []
         for u in md.urls():
             if u.isLocalFile():
-                p = u.toLocalFile()
+                p = os.path.normpath(u.toLocalFile())          # native separators (backslashes on Windows)
                 if p.lower().endswith(".torrent"):
                     files.append(p)
             elif u.scheme() in ("http", "https", "ftp", "magnet"):
