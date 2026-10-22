@@ -10,13 +10,15 @@ New-Item -ItemType Directory -Force $out, "$root\build\tools" | Out-Null
 python -c "from PySide6.QtGui import QGuiApplication, QImage, QPainter; from PySide6.QtSvg import QSvgRenderer; from PySide6.QtCore import Qt; a=QGuiApplication([]); r=QSvgRenderer('warpdown/assets/warpdown.svg'); im=QImage(256,256,QImage.Format_ARGB32); im.fill(Qt.transparent); p=QPainter(im); r.render(p); p.end(); im.save('warpdown/assets/warpdown.ico')"
 
 # the program itself (no console window) and the browser connector (needs stdin/stdout)
-python -m PyInstaller --noconfirm --windowed --name warpdown --icon warpdown/assets/warpdown.ico `
+python -m PyInstaller --noconfirm --windowed --name warpdown --icon "$root\warpdown\assets\warpdown.ico" `
   --distpath $out --workpath "$root\build\pyi" --specpath "$root\build\pyi" --paths $root `
   --add-data "$root\warpdown\assets;warpdown\assets" --add-data "$root\extension;extension" `
   packaging\windows\run_warpdown.py
-python -m PyInstaller --noconfirm --onefile --console --name warpdown-host --icon warpdown/assets/warpdown.ico `
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$out\warpdown\warpdown.exe")) { throw "PyInstaller failed for warpdown.exe" }
+python -m PyInstaller --noconfirm --onefile --console --name warpdown-host --icon "$root\warpdown\assets\warpdown.ico" `
   --distpath "$out\warpdown" --workpath "$root\build\pyi" --specpath "$root\build\pyi" --paths $root `
   native\warpdown_host.py
+if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$out\warpdown\warpdown-host.exe")) { throw "PyInstaller failed for warpdown-host.exe" }
 
 # helper programs: yt-dlp (video sites), aria2 (torrents), ffmpeg (joining video and audio)
 $tools = "$root\build\tools"
