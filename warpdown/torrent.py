@@ -109,7 +109,7 @@ class Aria2Downloader:
                 "--rpc-listen-all=false", f"--dir={self.job.dest.parent}", "--seed-time=0", "--continue=true",
                 "--file-allocation=none", "--auto-file-renaming=false", "--console-log-level=error",
                 "--summary-interval=0", "--bt-save-metadata=false", "--follow-torrent=true",
-                "--auto-save-interval=10", f"--dht-file-path={data_dir() / 'dht.dat'}", f"--dht-file-path6={data_dir() / 'dht6.dat'}", f"--log={data_dir() / 'aria2.log'}", "--log-level=warn"]
+                "--auto-save-interval=10", "--disk-cache=64M", f"--dht-file-path={data_dir() / 'dht.dat'}", f"--dht-file-path6={data_dir() / 'dht6.dat'}", f"--log={data_dir() / 'aria2.log'}", "--log-level=warn"]
         self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                                       **osutil.quiet())
 
