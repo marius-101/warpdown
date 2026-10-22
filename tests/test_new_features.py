@@ -476,3 +476,16 @@ def test_start_at_login_file_on_linux(tmp_path, monkeypatch):
     assert autostart.is_enabled() and "--background" in text and "Exec=" in text
     autostart.set_enabled(False)
     assert not autostart.is_enabled()
+
+
+def test_aria2_output_is_always_drained(tmp_path):
+    """A chatty aria2 must never fill the pipe (it would block mid-download on Windows)."""
+    import subprocess, sys
+    code = "import sys\nfor i in range(200000): print('progress line', i, 'x' * 60)\nprint('done')\n"
+    eng = torrent.Aria2Downloader(Job(MAGNET, tmp_path / "t", -1, False, 1, {}, {}), RateLimiter(0))
+    eng._proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                 text=True)
+    threading.Thread(target=eng._drain, args=(eng._proc.stdout,), daemon=True).start()
+    assert eng._proc.wait(timeout=60) == 0                      # without the reader this would hang forever
+    time.sleep(0.3)
+    assert list(eng._tail)[-1] == "done" and len(eng._tail) == 20

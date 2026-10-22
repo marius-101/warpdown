@@ -14,6 +14,7 @@ import sys
 import threading
 import time
 import urllib.request
+from collections import deque
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlsplit
 
@@ -77,6 +78,7 @@ class Aria2Downloader:
         self._total = 0
         self._speed = 0.0
         self._last_rate = -1
+        self._tail: deque[str] = deque(maxlen=20)       # the last lines aria2 printed
 
     # ---- public ----
     def start(self) -> None:
@@ -108,10 +110,21 @@ class Aria2Downloader:
         args = [exe, "--enable-rpc", f"--rpc-listen-port={self._port}", f"--rpc-secret={self._token}",
                 "--rpc-listen-all=false", f"--dir={self.job.dest.parent}", "--seed-time=0", "--continue=true",
                 "--file-allocation=none", "--auto-file-renaming=false", "--console-log-level=error",
-                "--summary-interval=0", "--bt-save-metadata=false", "--follow-torrent=true",
+                "--summary-interval=0", "--show-console-readout=false", "--bt-save-metadata=false", "--follow-torrent=true",
                 "--auto-save-interval=10", "--disk-cache=64M", f"--dht-file-path={data_dir() / 'dht.dat'}", f"--dht-file-path6={data_dir() / 'dht6.dat'}", f"--log={data_dir() / 'aria2.log'}", "--log-level=warn"]
+        self._tail.clear()
         self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                                       **osutil.quiet())
+        # Always read aria2's output: if nobody does, the pipe fills up (small on Windows) and aria2 blocks mid-download.
+        threading.Thread(target=self._drain, args=(self._proc.stdout,), daemon=True, name="warpdown-aria2-out").start()
+
+    def _drain(self, stream) -> None:
+        try:
+            for line in stream:
+                if line.strip():
+                    self._tail.append(line.strip())
+        except (OSError, ValueError):
+            pass
 
     def _rpc(self, method: str, *params):
         body = json.dumps({"jsonrpc": "2.0", "id": "w", "method": method,
@@ -127,7 +140,8 @@ class Aria2Downloader:
         end = time.monotonic() + 15
         while time.monotonic() < end and not self._stop.is_set():
             if self._proc and self._proc.poll() is not None:
-                tail = (self._proc.stdout.read() if self._proc.stdout else "").strip().splitlines()
+                time.sleep(0.2)                                  # let the reader collect aria2's last words
+                tail = list(self._tail)
                 raise RuntimeError(tail[-1] if tail else f"aria2 exited with code {self._proc.returncode}")
             try:
                 self._rpc("aria2.getVersion")
