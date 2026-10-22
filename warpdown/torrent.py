@@ -19,9 +19,13 @@ from urllib.parse import parse_qs, unquote, urlsplit
 
 from . import osutil
 from .engine import RateLimiter
+from .util import data_dir
 
 INSTALL_HINT = ("Torrents need aria2. Install it with: sudo apt install aria2" if not sys.platform.startswith("win")
                 else "Torrents need aria2. Download aria2 for Windows and put aria2c.exe next to Warpdown or in your PATH.")
+
+
+_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))      # the local aria2 never goes through a proxy
 
 
 def binary() -> str | None:
@@ -104,7 +108,8 @@ class Aria2Downloader:
         args = [exe, "--enable-rpc", f"--rpc-listen-port={self._port}", f"--rpc-secret={self._token}",
                 "--rpc-listen-all=false", f"--dir={self.job.dest.parent}", "--seed-time=0", "--continue=true",
                 "--file-allocation=none", "--auto-file-renaming=false", "--console-log-level=error",
-                "--summary-interval=0", "--bt-save-metadata=false", "--follow-torrent=true"]
+                "--summary-interval=0", "--bt-save-metadata=false", "--follow-torrent=true",
+                "--auto-save-interval=10", f"--log={data_dir() / 'aria2.log'}", "--log-level=warn"]
         self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, errors="replace",
                                       **osutil.quiet())
 
@@ -112,7 +117,7 @@ class Aria2Downloader:
         body = json.dumps({"jsonrpc": "2.0", "id": "w", "method": method,
                            "params": [f"token:{self._token}", *params]}).encode()
         req = urllib.request.Request(f"http://127.0.0.1:{self._port}/jsonrpc", body, {"Content-Type": "application/json"})
-        with urllib.request.urlopen(req, timeout=10) as r:
+        with _OPENER.open(req, timeout=30) as r:            # aria2 can be slow to answer while it checks or writes big files
             out = json.loads(r.read())
         if "error" in out:
             raise RuntimeError(out["error"].get("message", "aria2 error"))
@@ -170,9 +175,20 @@ class Aria2Downloader:
             if self._stop.is_set():
                 return
             gid = self._add()
+            failures = 0
             while not self._stop.is_set():
-                self._apply_rate()
-                gid, state = self._poll(gid)
+                try:
+                    self._apply_rate()
+                    gid, state = self._poll(gid)
+                    failures = 0
+                except (OSError, RuntimeError, ValueError) as e:       # aria2 busy or not answering for a moment
+                    if self._proc and self._proc.poll() is not None:
+                        raise RuntimeError(f"aria2 stopped unexpectedly (code {self._proc.returncode})") from e
+                    failures += 1
+                    if failures > 20:
+                        raise RuntimeError("aria2 does not answer") from e
+                    self._stop.wait(2.0)
+                    continue
                 if state == "complete" and not self._stop.is_set():
                     if self.name:
                         self.job.dest = self.job.dest.parent / self.name

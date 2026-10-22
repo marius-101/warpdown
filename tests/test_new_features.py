@@ -327,3 +327,86 @@ def test_torrent_download_follows_a_magnet_to_completion(tmp_path):
     assert eng.downloaded() == 1000 and eng.estimated_size() == 1000
     assert "aria2.addUri" in FakeAria2.calls and "aria2.changeGlobalOption" in FakeAria2.calls
     assert FakeAria2.calls[-1] == "aria2.shutdown"
+
+
+# ---------------------------------------------------------------- sorting by column, folder menu
+def test_clicking_a_column_sorts_and_a_third_click_restores_the_queue_order(m, qapp):
+    from warpdown import gui
+    a = m.add("http://x/b.bin", "/tmp/wd", filename="b.bin", start=False)
+    b = m.add("http://x/a.bin", "/tmp/wd", filename="a.bin", start=False)
+    c = m.add("http://x/c.bin", "/tmp/wd", filename="c.bin", start=False)
+    a.size, a.downloaded = 100, 90
+    b.size, b.downloaded = 100, 10
+    c.size, c.downloaded = 100, 50
+    win = gui.MainWindow(m)
+    try:
+        assert win.model.rows == [a.id, b.id, c.id]                      # queue order
+        win._header_clicked(2)                                             # Progress, ascending
+        assert win.model.rows == [b.id, c.id, a.id]
+        win._header_clicked(2)                                             # descending
+        assert win.model.rows == [a.id, c.id, b.id]
+        win._header_clicked(2)                                             # back to the queue order
+        assert win.model.rows == [a.id, b.id, c.id] and win.model.sort_col == -1
+        win._header_clicked(0)                                             # Name
+        assert win.model.rows == [b.id, a.id, c.id]
+        b.downloaded = 100
+        win._header_clicked(2)
+        assert win.model.reorder_if_needed() is False
+        c.downloaded = 99
+        assert win.model.reorder_if_needed() is True                       # values changed: re-sorted
+    finally:
+        win.close()
+        win.deleteLater()
+
+
+def test_stale_error_is_cleared_when_a_retry_starts(m, monkeypatch, tmp_path):
+    it = m.add("http://x/a.bin", str(tmp_path), filename="a.bin", start=False)
+    it.status, it.error, it.size = QUEUED, "timed out", 10
+    started = []
+    monkeypatch.setattr(mg.Downloader, "start", lambda self: started.append(1))
+    DownloadManager._launch(m, it)
+    assert it.status == DOWNLOADING and it.error == "" and started
+
+
+class Flaky(FakeAria2):
+    failures = 3
+
+    def do_POST(self):
+        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
+        if req["method"] == "aria2.tellStatus" and Flaky.failures > 0:
+            Flaky.failures -= 1
+            self.send_response(503)                      # aria2 too busy to answer
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        self._respond(req)
+
+    def _respond(self, req):
+        method, params = req["method"], req["params"][1:]
+        result = "OK"
+        if method == "aria2.getVersion":
+            result = {"version": "1.37"}
+        elif method == "aria2.addUri":
+            result = "g1"
+        elif method == "aria2.tellStatus":
+            result = {"status": "complete", "totalLength": "10", "completedLength": "10", "downloadSpeed": "0",
+                      "connections": "1", "bittorrent": {"info": {"name": "Flaky"}}}
+        body = json.dumps({"jsonrpc": "2.0", "id": "w", "result": result}).encode()
+        self.send_response(200)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+
+def test_torrent_survives_aria2_not_answering_for_a_moment(tmp_path):
+    Flaky.failures = 3
+    class D(FakeDownloader):
+        def _spawn(self):
+            self.srv = HTTPServer(("127.0.0.1", 0), Flaky)
+            self._port, self._token = self.srv.server_address[1], "secret"
+            threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+    finished = threading.Event()
+    eng = D(Job(MAGNET, tmp_path / "t", -1, False, 1, {}, {}), RateLimiter(0), on_finish=lambda d: finished.set())
+    eng.start()
+    assert finished.wait(30)
+    assert eng.done and not eng.error and Flaky.failures == 0

@@ -501,7 +501,7 @@ class DownloadManager(QObject):
         eng = cls(job, ChainedLimiter(self.limiter, own), on_finish=lambda d, i=it.id, q=self._inbox.queue: q.put(("finished", (i, d))))
         self.engines[it.id] = eng
         self._phase_active = True
-        it.status = DOWNLOADING
+        it.status, it.error = DOWNLOADING, ""          # a retry that has started no longer shows the last error
         self.changed.emit(it.id)
         eng.start()
 

@@ -124,6 +124,8 @@ class Model(QAbstractTableModel):
         self.mgr = mgr
         self.filter = "All Downloads"
         self.search = ""
+        self.sort_col = -1          # -1 = queue order; otherwise the column the user clicked
+        self.sort_desc = False
         self.rows: list[str] = []
         self.rebuild()
         mgr.added.connect(lambda _: self.rebuild())
@@ -148,8 +150,37 @@ class Model(QAbstractTableModel):
 
     def rebuild(self) -> None:
         self.beginResetModel()
-        self.rows = [i.id for i in self.mgr.queue_order() if self.matches(i)]       # same order as the queue
+        self.rows = self._ordered()
         self.endResetModel()
+
+    def _sort_key(self, it: Item):
+        c = self.sort_col
+        if c == 0:
+            return (it.filename or it.url).lower()
+        if c == 1:
+            return it.size
+        if c == 2:
+            return it.progress
+        if c == 3:
+            return it.speed
+        if c == 4:
+            return (it.size - it.downloaded) / it.speed if it.speed > 0 and it.size > 0 else float("inf")
+        if c == 5:
+            return it.status
+        return it.added
+
+    def _ordered(self) -> list[str]:
+        items = [i for i in self.mgr.queue_order() if self.matches(i)]       # the queue order...
+        if self.sort_col >= 0:                                                 # ...unless a column was clicked
+            items.sort(key=self._sort_key, reverse=self.sort_desc)
+        return [i.id for i in items]
+
+    def reorder_if_needed(self) -> bool:
+        """Re-sort after values changed (speed, progress ...). True if the order really changed."""
+        if self._ordered() == self.rows:
+            return False
+        self.rebuild()
+        return True
 
     def _all_changed(self) -> None:
         if self.rows:
@@ -1218,6 +1249,8 @@ class MainWindow(QMainWindow):
         h.setStretchLastSection(False)
         h.setSectionResizeMode(0, QHeaderView.Stretch)
         self._base_widths = [300, 75, 140, 85, 65, 250, 125]
+        h.setSectionsClickable(True)
+        h.sectionClicked.connect(self._header_clicked)
         self.table.doubleClicked.connect(self._open_file)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
@@ -1314,6 +1347,9 @@ class MainWindow(QMainWindow):
         mgr.queue_finished.connect(lambda: QTimer.singleShot(0, self._on_queue_finished))
         mgr.schedule_changed.connect(self._update_status)
         mgr.vpn_changed.connect(self._on_vpn_changed)
+        self._resort_timer = QTimer(self)             # keep a sorted column in order while speeds and progress change
+        self._resort_timer.timeout.connect(lambda: self.model.sort_col in (2, 3, 4, 5) and self._resort())
+        self._resort_timer.start(3000)
         for keys, where in (("Alt+Home", "top"), ("Alt+Up", "up"), ("Alt+Down", "down"), ("Alt+End", "bottom")):
             QShortcut(QKeySequence(keys), self, activated=lambda w=where: self.mgr.move(self._selected_ids(), w))
         QShortcut(QKeySequence.Find, self, activated=lambda: (self.search.setFocus(), self.search.selectAll()))
@@ -1540,6 +1576,32 @@ class MainWindow(QMainWindow):
         else:
             e.accept()
 
+    def _header_clicked(self, col: int) -> None:
+        """Click a column: sort ascending, click again: descending, a third time: back to the queue order."""
+        m, h = self.model, self.table.horizontalHeader()
+        if m.sort_col != col:
+            m.sort_col, m.sort_desc = col, False
+        elif not m.sort_desc:
+            m.sort_desc = True
+        else:
+            m.sort_col, m.sort_desc = -1, False
+        h.setSortIndicatorShown(m.sort_col >= 0)
+        if m.sort_col >= 0:
+            h.setSortIndicator(m.sort_col, Qt.DescendingOrder if m.sort_desc else Qt.AscendingOrder)
+        self._resort(force=True)
+
+    def _resort(self, force: bool = False) -> None:
+        keep = self._selected_ids()
+        if force:
+            self.model.rebuild()
+        elif not self.model.reorder_if_needed():
+            return
+        sel = self.table.selectionModel()
+        for iid in keep:
+            if iid in self.model.rows:
+                r = self.model.rows.index(iid)
+                sel.select(self.model.index(r, 0), sel.SelectionFlag.Select | sel.SelectionFlag.Rows)
+
     def _search(self, text):
         self.model.search = text
         self.model.rebuild()
@@ -1680,6 +1742,7 @@ class MainWindow(QMainWindow):
         m = QMenu(self)
         if it.status == COMPLETED:
             m.addAction("Open", lambda: self._open_file(idx))
+        if it.directory:
             m.addAction("Open folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(it.directory)))
         m.addAction("Resume", lambda: self._each(self.mgr.resume))
         m.addAction("Pause", lambda: self._each(self.mgr.pause))
