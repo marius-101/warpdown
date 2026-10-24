@@ -103,7 +103,9 @@ def stylesheet(style: str, c: dict) -> str:
                      border-radius: 8px; gridline-color: transparent; outline: none;
                      selection-background-color: {c['soft']}; selection-color: {c['text']}; }}
         QHeaderView::section {{ background: {c['base']}; color: {c['disabled']}; border: none;
-                               border-bottom: 1px solid {c['mid']}; padding: 6px 8px; }}
+                               border-right: 1px solid {c['mid']}; border-bottom: 1px solid {c['mid']};
+                               padding: 6px 8px; }}
+        QHeaderView::section:last {{ border-right: none; }}
         QGroupBox {{ border: 1px solid {c['mid']}; border-radius: 8px; margin-top: 12px; padding: 8px; }}
         QGroupBox::title {{ subcontrol-origin: margin; left: 10px; padding: 0 4px; }}
         QStatusBar {{ background: {c['window']}; }}

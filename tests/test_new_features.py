@@ -489,3 +489,27 @@ def test_aria2_output_is_always_drained(tmp_path):
     assert eng._proc.wait(timeout=60) == 0                      # without the reader this would hang forever
     time.sleep(0.3)
     assert list(eng._tail)[-1] == "done" and len(eng._tail) == 20
+
+
+def test_every_column_including_name_can_be_resized(m, qapp):
+    from PySide6.QtWidgets import QHeaderView
+    from warpdown import gui
+    win = gui.MainWindow(m)
+    try:
+        win.resize(1100, 500)
+        win.show()
+        pump(qapp, 0.3)
+        h = win.table.horizontalHeader()
+        assert all(h.sectionResizeMode(i) == QHeaderView.Interactive for i in range(h.count()))
+        before = h.sectionSize(0)
+        h.resizeSection(0, before + 120)                    # what dragging the Name divider does
+        assert h.sectionSize(0) == before + 120
+        win.resize(1400, 500)                               # a wider window: free space goes to Name, nothing is lost
+        pump(qapp, 0.3)
+        assert h.length() >= win.table.viewport().width() - 1
+        win.resize(900, 500)                                # a narrower window: Name gives way, no scrollbar needed
+        pump(qapp, 0.3)
+        assert h.length() <= win.table.viewport().width() + 1 or h.sectionSize(0) == 120
+    finally:
+        win.close()
+        win.deleteLater()

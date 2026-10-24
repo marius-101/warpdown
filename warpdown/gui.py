@@ -9,7 +9,7 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QAbstractTableModel, QModelIndex, QRectF, QSettings, QSize, Qt, QTime, QTimer, QUrl,
+from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QRectF, QSettings, QSize, Qt, QTime, QTimer, QUrl,
                             Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon,
                            QKeySequence, QPainter, QPalette, QShortcut)
@@ -1266,7 +1266,8 @@ class MainWindow(QMainWindow):
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(QHeaderView.Interactive)
         h.setStretchLastSection(False)
-        h.setSectionResizeMode(0, QHeaderView.Stretch)
+        h.setMinimumSectionSize(60)
+        self.table.viewport().installEventFilter(self)         # window resized: the Name column takes the free space
         self._base_widths = [300, 75, 140, 85, 65, 250, 125]
         h.setSectionsClickable(True)
         h.sectionClicked.connect(self._header_clicked)
@@ -1536,11 +1537,24 @@ class MainWindow(QMainWindow):
         finally:
             d.deleteLater()
 
+    def eventFilter(self, obj, ev):
+        if obj is self.table.viewport() and ev.type() == QEvent.Resize:
+            QTimer.singleShot(0, self._fill_name)
+        return super().eventFilter(obj, ev)
+
+    def _fill_name(self) -> None:
+        """All columns can be dragged. When the window is resized, the Name column absorbs the difference."""
+        h = self.table.horizontalHeader()
+        gap = self.table.viewport().width() - h.length()
+        if gap:                                    # free space goes to Name; too little space is taken from it (down to 120 px)
+            h.resizeSection(0, max(120, h.sectionSize(0) + gap))
+
     def rescale(self) -> None:
         """Make columns, row height and toolbar icons follow the current text size."""
         k = font_scale()
         for i, w in enumerate(self._base_widths):
             self.table.setColumnWidth(i, int(w * k))
+        self._fill_name()
         # use the application font, not the table's own: widgets pick up a new app font a moment later
         self.table.verticalHeader().setDefaultSectionSize(QFontMetrics(QApplication.font()).height() + 10)
         self.toolbar.setIconSize(QSize(int(self._base_icon.width() * k), int(self._base_icon.height() * k)))
