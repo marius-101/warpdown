@@ -33,18 +33,19 @@ print("smoke test passed")
 # keep running after the host is gone (Firefox ends everything a host started unless it was started independently).
 import time
 
-env2 = {k: v for k, v in env.items() if k != "WARPDOWN_QUIT_AFTER_MS"}
+# Normal data folder (Explorer-started programs do not inherit this script's private environment).
+env2 = {k: v for k, v in os.environ.items()}
 msg = json.dumps({"action": "add", "url": "http://127.0.0.1:9/test.bin"}).encode()
 r = subprocess.run([str(root / "warpdown-host.exe")], input=struct.pack("=I", len(msg)) + msg, env=env2,
                    capture_output=True, timeout=120)
 n = struct.unpack("=I", r.stdout[:4])[0]
 reply = json.loads(r.stdout[4:4 + n])
+log = Path(os.environ["LOCALAPPDATA"]) / "warpdown" / "host.log"
+print("host.log:\n" + (log.read_text()[-800:] if log.exists() else "(none)"))
 print("host reply (Warpdown was not running):", reply)
-assert reply == {"ok": True}, reply
 time.sleep(5)
 alive = "warpdown.exe" in subprocess.run(["tasklist"], capture_output=True, text=True).stdout.lower()
-log = (Path(env["LOCALAPPDATA"]) / "warpdown" / "host.log")
-print(log.read_text()[-500:] if log.exists() else "no host.log")
 subprocess.run(["taskkill", "/F", "/IM", "warpdown.exe"], capture_output=True)
+assert reply == {"ok": True}, reply
 assert alive, "Warpdown ended together with the host"
 print("host hand-off smoke test passed")
