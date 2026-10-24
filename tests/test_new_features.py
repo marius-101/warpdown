@@ -535,3 +535,60 @@ def test_browser_host_starts_warpdown_outside_the_browsers_job(monkeypatch):
     monkeypatch.setattr(osutil, "IS_WINDOWS", False)
     calls.clear()
     assert osutil.start_independent(["x"]) == "new session"
+
+
+# ---------------------------------------------------------------- update check
+def test_version_comparison():
+    from warpdown import updates
+    assert updates.parse_version("v0.8.5") == (0, 8, 5) and updates.parse_version("1.2-beta") == (1, 2)
+    assert updates.is_newer("0.8.6", "0.8.5") and updates.is_newer("0.10.0", "0.9.9") and updates.is_newer("1.0", "0.9.9")
+    assert not updates.is_newer("0.8.5", "0.8.5") and not updates.is_newer("0.8.4", "0.8.5")
+    assert not updates.is_newer("", "0.8.5") and not updates.is_newer("garbage", "0.8.5")
+
+
+def test_fetching_the_latest_release(monkeypatch):
+    import httpx
+    from warpdown import updates
+
+    class R:
+        def __init__(self, data, code=200):
+            self._d, self.status_code = data, code
+
+        def raise_for_status(self):
+            if self.status_code >= 400:
+                raise httpx.HTTPStatusError("boom", request=None, response=None)
+
+        def json(self):
+            return self._d
+
+    monkeypatch.setattr(updates.httpx, "get", lambda *a, **k: R({"tag_name": "v0.9.0", "html_url": "https://x/r"}))
+    assert updates.fetch_latest() == ("0.9.0", "https://x/r")
+    monkeypatch.setattr(updates.httpx, "get", lambda *a, **k: R({}, 404))
+    with pytest.raises(RuntimeError):
+        updates.fetch_latest()
+    monkeypatch.setattr(updates.httpx, "get", lambda *a, **k: R({"tag_name": "nightly"}))
+    with pytest.raises(RuntimeError, match="no release"):
+        updates.fetch_latest()
+
+
+def test_window_shows_an_update_notice_only_when_newer(m, qapp, tmp_path, monkeypatch):
+    from PySide6.QtCore import QSettings
+    from warpdown import gui, __version__
+    QSettings().remove("update_notified")
+    win = gui.MainWindow(m)
+    shown = []
+    monkeypatch.setattr(win.tray, "showMessage", lambda *a, **k: shown.append(a))
+    try:
+        win._on_update_result(__version__, "https://x/r", "", False)               # same version: nothing to say
+        assert win.update_label.isHidden() and shown == []
+        win._on_update_result("99.0.0", "https://x/r", "", False)
+        assert not win.update_label.isHidden() and "99.0.0" in win.update_label.text() and len(shown) == 1
+        win._on_update_result("99.0.0", "https://x/r", "", False)                 # the pop-up appears once per version
+        assert len(shown) == 1
+        win._on_update_result("", "", "no network", True)                          # errors only matter when asked for
+        assert "no network" in win.status.currentMessage()
+        win._on_update_result(__version__, "https://x/r", "", True)
+        assert win.update_label.isHidden() and "latest" in win.status.currentMessage()
+    finally:
+        win.close()
+        win.deleteLater()

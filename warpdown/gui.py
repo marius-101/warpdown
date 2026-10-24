@@ -257,7 +257,7 @@ class Model(QAbstractTableModel):
         return None
 
 
-from . import autostart, clipwatch, osutil, torrent
+from . import autostart, clipwatch, osutil, torrent, updates
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -1063,6 +1063,7 @@ class ExtensionDialog(QDialog):
 class SettingsDialog(QDialog):
     font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
     theme_preview = Signal(str, str)  # (style, mode), likewise
+    check_updates = Signal()          # "Check now" pressed
 
     def __init__(self, parent, mgr: DownloadManager):
         super().__init__(parent)
@@ -1094,6 +1095,10 @@ class SettingsDialog(QDialog):
         self.vpn.setChecked(str(s.value("require_vpn", "false")).lower() == "true")
         self.vpn.setToolTip("Looks for a VPN network connection (WireGuard, OpenVPN, ProtonVPN, Mullvad, Tailscale …). "
                             "Downloads stop at once when it drops and continue when it is back.")
+        self.upd = QCheckBox("Check for new versions of Warpdown (asks GitHub about once a day)")
+        self.upd.setChecked(str(s.value("check_updates", "true")).lower() == "true")
+        self.upd_now = QPushButton("Check now")
+        self.upd_now.clicked.connect(self.check_updates.emit)
         self.autostart = QCheckBox("Start Warpdown when I log in (minimized to the tray)")
         self.autostart.setChecked(autostart.is_enabled())
         self.autostart.setToolTip("Browser downloads then reach Warpdown instantly, without waiting for it to start.")
@@ -1141,6 +1146,10 @@ class SettingsDialog(QDialog):
         form.addRow("", self.vpn)
         form.addRow("", self.sums)
         form.addRow("", self.autostart)
+        urow = QHBoxLayout()
+        urow.addWidget(self.upd, 1)
+        urow.addWidget(self.upd_now)
+        form.addRow("", urow)
         form.addRow("", self.retry)
         form.addRow("Maximum retries:", self.retries)
         form.addRow("", self.clip)
@@ -1183,6 +1192,14 @@ def _settings_update_methods():
 
 SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated, SettingsDialog._open_extension_dialog = \
     _settings_update_methods()
+
+
+def _update_worker(q, manual: bool) -> None:
+    try:
+        version, url = updates.fetch_latest()
+        q.put(("update", (version, url, "", manual)))
+    except Exception as e:  # noqa: BLE001
+        q.put(("update", ("", "", str(e) or e.__class__.__name__, manual)))
 
 
 class BarChart(QWidget):
@@ -1351,6 +1368,7 @@ class MainWindow(QMainWindow):
         tm.addAction("Show", self.show_raise)
         tm.addAction("Add URL…", self.add_dialog)
         tm.addAction("Batch download…", lambda: self.batch_dialog())
+        tm.addAction("Check for updates", lambda: self.check_for_updates(manual=True))
         self.tray_clip = tm.addAction("Watch clipboard for downloads")
         self.tray_clip.setCheckable(True)
         self.tray_clip.toggled.connect(self._toggle_clipboard)
@@ -1367,6 +1385,12 @@ class MainWindow(QMainWindow):
         mgr.queue_finished.connect(lambda: QTimer.singleShot(0, self._on_queue_finished))
         mgr.schedule_changed.connect(self._update_status)
         mgr.vpn_changed.connect(self._on_vpn_changed)
+        self._update_inbox = Inbox({"update": self._on_update_result}, self)
+        self.update_label = QLabel()
+        self.update_label.setOpenExternalLinks(True)
+        self.update_label.hide()
+        self.status.addPermanentWidget(self.update_label)
+        QTimer.singleShot(20000, self._auto_update_check)       # shortly after start, never while the window is still opening
         self._resort_timer = QTimer(self)             # keep a sorted column in order while speeds and progress change
         self._resort_timer.timeout.connect(lambda: self.model.sort_col in (2, 3, 4, 5) and self._resort())
         self._resort_timer.start(3000)
@@ -1709,6 +1733,38 @@ class MainWindow(QMainWindow):
         d.exec()
         d.deleteLater()
 
+    # ---- update check ----
+    def _auto_update_check(self) -> None:
+        s = QSettings()
+        if str(s.value("check_updates", "true")).lower() != "true":
+            return
+        if time.time() - float(s.value("last_update_check", 0) or 0) < 20 * 3600:
+            return
+        self.check_for_updates(manual=False)
+
+    def check_for_updates(self, manual: bool = False) -> None:
+        if manual:
+            self.status.showMessage("Checking for updates…", 5000)
+        threading.Thread(target=_update_worker, args=(self._update_inbox.queue, manual), daemon=True).start()
+
+    def _on_update_result(self, version: str, url: str, error: str, manual: bool) -> None:
+        if error:
+            if manual:
+                self.status.showMessage(f"Could not check for updates: {error}", 8000)
+            return
+        QSettings().setValue("last_update_check", time.time())
+        if updates.is_newer(version, __version__):
+            self.update_label.setText(f'<a href="{html.escape(url)}">Update available: {html.escape(version)}</a>')
+            self.update_label.show()
+            if QSettings().value("update_notified") != version or manual:
+                QSettings().setValue("update_notified", version)
+                self.tray.showMessage("Warpdown update", f"Version {version} is available (you have {__version__}). "
+                                      "Click “Update available” in the status bar.", QSystemTrayIcon.Information, 8000)
+        else:
+            self.update_label.hide()
+            if manual:
+                self.status.showMessage(f"You have the latest version ({__version__}).", 6000)
+
     def _on_vpn_changed(self, blocked: bool):
         if blocked:
             self.tray.showMessage("Warpdown", "VPN disconnected: downloads are paused until it is back.",
@@ -1772,6 +1828,7 @@ class MainWindow(QMainWindow):
         d = SettingsDialog(self, self.mgr)
         d.font_preview.connect(self.set_font_size)
         d.theme_preview.connect(self.set_theme)
+        d.check_updates.connect(lambda: self.check_for_updates(manual=True))
         if d.exec() == QDialog.Accepted:
             s = QSettings()
             s.setValue("download_dir", d.dir.text())
@@ -1784,6 +1841,7 @@ class MainWindow(QMainWindow):
             s.setValue("limit_sched_to", d.lto.time().toString("HH:mm"))
             s.setValue("require_vpn", d.vpn.isChecked())
             s.setValue("find_checksums", d.sums.isChecked())
+            s.setValue("check_updates", d.upd.isChecked())
             try:
                 autostart.set_enabled(d.autostart.isChecked())
             except OSError as e:
