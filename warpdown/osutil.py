@@ -13,6 +13,7 @@ FROZEN = bool(getattr(sys, "frozen", False))          # True in the installed Wi
 CREATE_NO_WINDOW = 0x08000000
 DETACHED_PROCESS = 0x00000008
 CREATE_NEW_PROCESS_GROUP = 0x00000200
+CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def app_dir() -> Path:
@@ -30,6 +31,30 @@ def detached() -> dict:
     if IS_WINDOWS:
         return {"creationflags": DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW}
     return {"start_new_session": True}
+
+
+def start_independent(cmd: list[str]) -> str:
+    """Start a program that must keep running after the caller ends, even if the caller is a browser's native-messaging
+    host: Firefox ends the host together with everything the host started (a Windows "job"). Returns how it was started."""
+    import subprocess
+    quiet_io = {"stdout": subprocess.DEVNULL, "stderr": subprocess.DEVNULL, "stdin": subprocess.DEVNULL}
+    if not IS_WINDOWS:
+        subprocess.Popen(cmd, start_new_session=True, **quiet_io)
+        return "new session"
+    flags = DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW
+    try:                                                    # leave the browser's job, if its rules allow that
+        subprocess.Popen(cmd, creationflags=flags | CREATE_BREAKAWAY_FROM_JOB, **quiet_io)
+        return "breakaway"
+    except OSError:
+        pass
+    if len(cmd) == 1:                                       # otherwise let Explorer start it: not part of the browser's job
+        try:
+            subprocess.Popen(["explorer.exe", cmd[0]], **quiet_io)
+            return "explorer"
+        except OSError:
+            pass
+    subprocess.Popen(cmd, creationflags=flags, **quiet_io)
+    return "detached"
 
 
 def helper(name: str) -> str | None:

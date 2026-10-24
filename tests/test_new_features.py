@@ -513,3 +513,25 @@ def test_every_column_including_name_can_be_resized(m, qapp):
     finally:
         win.close()
         win.deleteLater()
+
+
+def test_browser_host_starts_warpdown_outside_the_browsers_job(monkeypatch):
+    import subprocess
+    from warpdown import osutil
+    calls = []
+
+    def fake_popen(cmd, **kw):
+        calls.append((cmd, kw.get("creationflags", 0)))
+        if kw.get("creationflags", 0) & osutil.CREATE_BREAKAWAY_FROM_JOB:
+            raise PermissionError("the job does not allow breakaway")
+
+    monkeypatch.setattr(osutil, "IS_WINDOWS", True)
+    monkeypatch.setattr(subprocess, "Popen", fake_popen)
+    assert osutil.start_independent(["C:/Warpdown/warpdown.exe"]) == "explorer"       # breakaway refused -> Explorer
+    assert calls[0][1] & osutil.CREATE_BREAKAWAY_FROM_JOB and calls[1][0][0] == "explorer.exe"
+    calls.clear()
+    monkeypatch.setattr(subprocess, "Popen", lambda cmd, **kw: calls.append((cmd, kw.get("creationflags", 0))))
+    assert osutil.start_independent(["warpdown.exe"]) == "breakaway" and len(calls) == 1
+    monkeypatch.setattr(osutil, "IS_WINDOWS", False)
+    calls.clear()
+    assert osutil.start_independent(["x"]) == "new session"

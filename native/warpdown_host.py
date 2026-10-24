@@ -43,13 +43,16 @@ def main():
         ok = ipc.send(msg)
         if not ok:
             app = osutil.helper("warpdown")                      # the installed Windows program, or Python from source
-            subprocess.Popen([app] if app else [sys.executable, "-m", "warpdown"],
-                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **osutil.detached())
+            try:
+                log("Warpdown not running, starting it: " + osutil.start_independent([app] if app else [sys.executable, "-m", "warpdown"]))
+            except OSError as e:
+                log(f"could not start Warpdown: {e}")
             for _ in range(40):                                   # up to 20 s for a cold start (slow disks, virtual machines)
                 time.sleep(0.5)
                 if ipc.send(msg):
                     ok = True
                     break
+        log("delivered" if ok else "NOT delivered")
         write_message({"ok": ok})
 
 
