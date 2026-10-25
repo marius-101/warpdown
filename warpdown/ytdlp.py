@@ -58,6 +58,17 @@ def looks_like_video_site(url: str) -> bool:
     return any(host == h or host.endswith("." + h) for h in VIDEO_HOSTS)
 
 
+# File hosts: their addresses are files (or a sign-in page when something is missing), never a page with a video.
+FILE_HOSTS = ("drive.google.com", "drive.usercontent.google.com", "docs.google.com", "googleusercontent.com",
+              "dropbox.com", "dl.dropboxusercontent.com", "onedrive.live.com", "1drv.ms", "github.com",
+              "githubusercontent.com", "sourceforge.net", "mediafire.com", "mega.nz", "wetransfer.com")
+
+
+def is_file_host(url: str) -> bool:
+    host = (urlsplit(url).hostname or "").lower()
+    return any(host == h or host.endswith("." + h) for h in FILE_HOSTS)
+
+
 def is_youtube(url: str) -> bool:
     host = (urlsplit(url).hostname or "").lower()
     return host.endswith(("youtube.com", "youtu.be", "youtube-nocookie.com"))

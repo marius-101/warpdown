@@ -40,9 +40,9 @@ _PEEK_SLOTS = threading.Semaphore(3)
 # ---- background workers -------------------------------------------------------------------------------------
 # Module-level on purpose: they get only plain data and a queue, so they cannot capture (and later release or emit on)
 # a dialog from a worker thread. Results reach the dialog through its Inbox, in the GUI thread.
-def _probe_worker(q, url: str) -> None:
+def _probe_worker(q, url: str, headers: dict) -> None:
     try:
-        q.put(("probed", (probe(url), "")))
+        q.put(("probed", (probe(url, headers), "")))
     except Exception as e:  # noqa: BLE001
         q.put(("probed", (None, str(e))))
 
@@ -257,7 +257,7 @@ class Model(QAbstractTableModel):
         return None
 
 
-from . import autostart, clipwatch, osutil, torrent, updates
+from . import autostart, clipwatch, kdeconnect, osutil, torrent, updates
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -301,6 +301,7 @@ class AddDialog(QDialog):
         self._inbox = Inbox({"probed": self._on_probed, "yt": self._on_yt_ready, "sub": self._on_sub_info}, self)
         self._hdrs = {{"referer": "Referer", "cookie": "Cookie", "user_agent": "User-Agent"}[k]: v
                       for k, v in (headers or {}).items() if k in ("referer", "cookie", "user_agent") and v}
+        self._cookie_origin = (headers or {}).get("cookie_origin", "")
         self._yt_user_set = use_ytdlp            # don't auto-toggle if the browser already told us the mode
         self.setWindowTitle("Add Download")
         self.setMinimumWidth(int(520 * font_scale()))
@@ -529,13 +530,23 @@ class AddDialog(QDialog):
             return self._probe_ytdlp(u)
         self.info.setText("Checking…")
 
-        threading.Thread(target=_probe_worker, args=(self._inbox.queue, u), daemon=True).start()
+        threading.Thread(target=_probe_worker, args=(self._inbox.queue, u, self._probe_headers(u)), daemon=True).start()
+
+    def _probe_headers(self, url: str) -> dict:
+        """What the browser sent (login cookie, referrer): without it, private files answer with a sign-in page.
+        The cookie only goes to the site it came from."""
+        out = dict(self._hdrs)
+        host = url.split("/")[2].lower() if url.count("/") >= 2 else ""
+        if self._cookie_origin and "Cookie" in out and host != self._cookie_origin.lower():
+            del out["Cookie"]
+        return out
 
     def _on_probed(self, res, err):
         if res is None:
             self.info.setText(f"Could not check: {err}")
             return
-        if (res.content_type or "").lower().startswith("text/html") and not self._yt_user_set and ytdlp.available():
+        if ((res.content_type or "").lower().startswith("text/html") and not self._yt_user_set and ytdlp.available()
+                and not ytdlp.is_file_host(self.url.text().strip())):
             self._set_ytdlp(True)                          # a web page, not a file: let yt-dlp look for the video
             return self._probe_ytdlp(self.url.text().strip())
         if getattr(res, "sub_tracks", None):
@@ -1878,6 +1889,13 @@ class MainWindow(QMainWindow):
             m.addAction("Open", lambda: self._open_file(idx))
         if it.directory:
             m.addAction("Open folder", lambda: QDesktopServices.openUrl(QUrl.fromLocalFile(it.directory)))
+        if it.status == COMPLETED and kdeconnect.available():
+            sm = m.addMenu("Send to phone (KDE Connect)")
+            devs = kdeconnect.devices()
+            for dev_id, name in devs:
+                sm.addAction(name, lambda d=dev_id: kdeconnect.send(d, it.path))
+            if not devs:
+                sm.addAction("No paired device reachable").setEnabled(False)
         m.addAction("Resume", lambda: self._each(self.mgr.resume))
         m.addAction("Pause", lambda: self._each(self.mgr.pause))
         m.addAction("Copy URL", lambda: (self.clip.remember(it.url), QGuiApplication.clipboard().setText(it.url)))

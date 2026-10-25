@@ -592,3 +592,29 @@ def test_window_shows_an_update_notice_only_when_newer(m, qapp, tmp_path, monkey
     finally:
         win.close()
         win.deleteLater()
+
+
+# ---------------------------------------------------------------- browser downloads of private files (Google Drive)
+def test_add_dialog_checks_the_link_with_the_browsers_cookies(qapp):
+    from warpdown import gui, ytdlp
+    hdrs = {"cookie": "SID=abc", "referer": "https://drive.google.com/", "user_agent": "UA", "cookie_origin": "drive.usercontent.google.com"}
+    d = gui.AddDialog(None, "", hdrs)
+    try:
+        same = d._probe_headers("https://drive.usercontent.google.com/download?id=1")
+        assert same == {"Cookie": "SID=abc", "Referer": "https://drive.google.com/", "User-Agent": "UA"}
+        other = d._probe_headers("https://example.org/file.zip")             # another site never gets the login cookie
+        assert "Cookie" not in other and other["Referer"] == "https://drive.google.com/"
+    finally:
+        d.deleteLater()
+    assert ytdlp.is_file_host("https://drive.usercontent.google.com/download?id=1&export=download")
+    assert ytdlp.is_file_host("https://docs.google.com/uc?id=1") and not ytdlp.is_file_host("https://www.youtube.com/watch?v=1")
+
+
+def test_probe_worker_sends_the_headers(monkeypatch):
+    import queue
+    from warpdown import gui
+    seen = {}
+    monkeypatch.setattr(gui, "probe", lambda url, headers=None: seen.update(url=url, headers=headers) or "RES")
+    q = queue.SimpleQueue()
+    gui._probe_worker(q, "http://x/a", {"Cookie": "c=1"})
+    assert seen == {"url": "http://x/a", "headers": {"Cookie": "c=1"}} and q.get() == ("probed", ("RES", ""))
