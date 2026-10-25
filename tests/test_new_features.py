@@ -618,3 +618,34 @@ def test_probe_worker_sends_the_headers(monkeypatch):
     q = queue.SimpleQueue()
     gui._probe_worker(q, "http://x/a", {"Cookie": "c=1"})
     assert seen == {"url": "http://x/a", "headers": {"Cookie": "c=1"}} and q.get() == ("probed", ("RES", ""))
+
+
+def test_power_commands_inside_a_flatpak(monkeypatch):
+    from warpdown import scheduler as sch
+    monkeypatch.setattr(sch, "IS_WINDOWS", False)
+    monkeypatch.setenv("FLATPAK_ID", "io.github.marius101.Warpdown")
+    assert sch.power_command(sch.AFTER_SLEEP)[0] == "gdbus" and "Suspend" in sch.power_command(sch.AFTER_SLEEP)[-2]
+    assert "PowerOff" in sch.power_command(sch.AFTER_POWEROFF)[-2]
+    monkeypatch.delenv("FLATPAK_ID")
+    assert sch.power_command(sch.AFTER_SLEEP) == ["systemctl", "suspend"]
+    assert sch.power_command(sch.AFTER_NOTHING) is None
+
+
+def test_unix_registration_writes_manifests(tmp_path, monkeypatch):
+    import json
+    from warpdown import browsers
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.setenv("XDG_DATA_HOME", str(tmp_path / "data"))
+    monkeypatch.setattr(browsers.Path, "home", classmethod(lambda cls: tmp_path))
+    (tmp_path / ".config" / "google-chrome").mkdir(parents=True)
+    ok, msg = browsers.register_unix("abcdefghijklmnopabcdefghijklmnop")
+    assert ok and "Firefox" in msg and "google-chrome" in msg
+    ff = json.loads((tmp_path / ".mozilla/native-messaging-hosts/org.warpdown.host.json").read_text())
+    ch = json.loads((tmp_path / ".config/google-chrome/NativeMessagingHosts/org.warpdown.host.json").read_text())
+    assert ff["allowed_extensions"] and ch["allowed_origins"] == ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]
+    assert ff["path"] == ch["path"]
+    monkeypatch.setenv("FLATPAK_ID", "io.github.marius101.Warpdown")                  # inside a Flatpak: wrapper script
+    ok, _ = browsers.register_unix()
+    ff = json.loads((tmp_path / ".mozilla/native-messaging-hosts/org.warpdown.host.json").read_text())
+    wrapper = Path(ff["path"])
+    assert wrapper.name == "warpdown-host-flatpak" and "flatpak run --command=/app/warpdown/warpdown-host" in wrapper.read_text()

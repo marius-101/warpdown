@@ -1113,6 +1113,7 @@ class SettingsDialog(QDialog):
         self.autostart = QCheckBox("Start Warpdown when I log in (minimized to the tray)")
         self.autostart.setChecked(autostart.is_enabled())
         self.autostart.setToolTip("Browser downloads then reach Warpdown instantly, without waiting for it to start.")
+        self.autostart.setVisible(not os.environ.get("FLATPAK_ID"))       # a Flatpak cannot add itself to the login items
         self.sums = QCheckBox("Look for a published checksum next to downloaded files and verify it")
         self.sums.setChecked(str(s.value("find_checksums", "true")).lower() == "true")
         self.retry = QCheckBox("Retry failed downloads automatically (temporary network or server problems)")

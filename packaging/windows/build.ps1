@@ -12,7 +12,7 @@ python -c "from PySide6.QtGui import QGuiApplication, QImage, QPainter; from PyS
 # the program itself (no console window) and the browser connector (needs stdin/stdout)
 python -m PyInstaller --noconfirm --windowed --name warpdown --icon "$root\warpdown\assets\warpdown.ico" `
   --distpath $out --workpath "$root\build\pyi" --specpath "$root\build\pyi" --paths $root `
-  --add-data "$root\warpdown\assets;warpdown\assets" --add-data "$root\extension;extension" `
+  --exclude-module yt_dlp --add-data "$root\warpdown\assets;warpdown\assets" --add-data "$root\extension;extension" `
   packaging\windows\run_warpdown.py
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$out\warpdown\warpdown.exe")) { throw "PyInstaller failed for warpdown.exe" }
 python -m PyInstaller --noconfirm --onefile --console --name warpdown-host --icon "$root\warpdown\assets\warpdown.ico" `

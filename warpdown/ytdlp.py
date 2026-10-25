@@ -7,6 +7,7 @@ DRM-protected streams are not (and cannot be) handled; yt-dlp itself refuses tho
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import sys
@@ -19,9 +20,23 @@ from urllib.parse import urlsplit
 
 from . import osutil
 from .engine import RateLimiter
+from .util import data_dir
+
+def _user_copy() -> Path:
+    return data_dir() / ("yt-dlp.exe" if osutil.IS_WINDOWS else "yt-dlp")
+
+
+def _exe() -> str | None:
+    """The yt-dlp program shipped with the installed program, or a newer copy the user updated (system-wide installs
+    cannot write to their own folder)."""
+    bundled = osutil.helper("yt-dlp")
+    if bundled and _user_copy().is_file():
+        return str(_user_copy())
+    return bundled
+
 
 def _make_cmd() -> list[str]:
-    exe = osutil.helper("yt-dlp")                       # the installed Windows program ships yt-dlp.exe
+    exe = _exe()
     return [exe] if exe else [sys.executable, "-m", "yt_dlp"]
 
 
@@ -44,7 +59,7 @@ AUDIO_ONLY = "Audio only (MP3)"
 
 
 def available() -> bool:
-    if osutil.helper("yt-dlp"):
+    if _exe():
         return True
     try:
         import yt_dlp  # noqa: F401
@@ -83,7 +98,7 @@ def js_runtime() -> str | None:
 
 
 def version() -> str:
-    exe = osutil.helper("yt-dlp")
+    exe = _exe()
     if exe:
         try:
             r = subprocess.run([exe, "--version"], capture_output=True, text=True, timeout=30, **osutil.quiet())
@@ -99,9 +114,14 @@ def version() -> str:
 
 def update() -> tuple[bool, str]:
     """pip-upgrade yt-dlp inside Warpdown's own environment (sites change often; old versions break)."""
-    exe = osutil.helper("yt-dlp")
+    exe = _exe()
+    if exe and not os.access(os.path.dirname(exe), os.W_OK):      # installed system-wide: update a copy in the user's folder
+        shutil.copy2(exe, _user_copy())
+        os.chmod(_user_copy(), 0o755)
+        exe = str(_user_copy())
     cmd = [exe, "-U"] if exe else [sys.executable, "-m", "pip", "install", "-U", "yt-dlp[default]"]
     r = subprocess.run(cmd, capture_output=True, text=True, timeout=300, **osutil.quiet())
+    CMD[:] = _make_cmd()
     out = (r.stdout if r.returncode == 0 else r.stderr).strip().splitlines()
     return r.returncode == 0, out[-1] if out else ""
 

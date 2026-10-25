@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from datetime import datetime, time, timedelta
 
@@ -18,6 +19,11 @@ def power_command(action: str) -> list[str] | None:
     if IS_WINDOWS:
         return {AFTER_SLEEP: ["rundll32.exe", "powrprof.dll,SetSuspendState", "0,1,0"],
                 AFTER_POWEROFF: ["shutdown", "/s", "/t", "0"]}.get(action)
+    if os.environ.get("FLATPAK_ID"):           # a Flatpak cannot run systemctl: ask the login manager over D-Bus
+        call = ["gdbus", "call", "--system", "--dest", "org.freedesktop.login1", "--object-path",
+                "/org/freedesktop/login1", "--method"]
+        return {AFTER_SLEEP: [*call, "org.freedesktop.login1.Manager.Suspend", "true"],
+                AFTER_POWEROFF: [*call, "org.freedesktop.login1.Manager.PowerOff", "true"]}.get(action)
     return {AFTER_SLEEP: ["systemctl", "suspend"], AFTER_POWEROFF: ["systemctl", "poweroff"]}.get(action)
 
 

@@ -55,15 +55,15 @@ def main(argv: list[str] | None = None) -> int:
     app = QApplication(argv)
     app.setApplicationName("warpdown")
     app.setOrganizationName("warpdown")
-    app.setDesktopFileName("warpdown")
+    app.setDesktopFileName(os.environ.get("FLATPAK_ID", "warpdown"))     # the Flatpak's desktop file is named after its ID
     app.setWindowIcon(app_icon())
     app.setQuitOnLastWindowClosed(False)
     apply_font(saved_font_size())          # text size chosen in Settings (0 = system default)
     themes.apply_theme(*saved_theme())    # style + mode chosen in Settings
 
-    if osutil.IS_WINDOWS and osutil.FROZEN:           # keep the browser connector registered (cheap; current user only)
-        try:
-            browsers.register_windows()
+    if osutil.FROZEN and (osutil.IS_WINDOWS or os.environ.get("FLATPAK_ID")):   # keep the browser connector registered
+        try:                                                                   # (cheap; current user only)
+            browsers.register_windows() if osutil.IS_WINDOWS else browsers.register_unix()
         except OSError:
             pass
     mgr = DownloadManager()

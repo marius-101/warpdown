@@ -78,6 +78,19 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 The Windows program includes yt-dlp, ffmpeg and aria2, so video sites, merging and torrents work out of the box.
 It is built and smoke-tested automatically on a Windows machine (GitHub Actions) for every change.
 
+## Install on Linux
+Download from the [latest release](https://github.com/marius-101/warpdown/releases/latest):
+
+- **`warpdown_<version>_amd64.deb`** (Kubuntu, Ubuntu, Debian, Mint …):
+  `sudo apt install ./warpdown_<version>_amd64.deb` — installs the program, the menu entry and the Firefox connector.
+  `ffmpeg` and `aria2` are installed with it (recommended packages).
+- **`warpdown-<version>.flatpak`** (any distribution with Flatpak):
+  `flatpak install --user warpdown-<version>.flatpak`. It includes ffmpeg and aria2. It can read your Downloads, Videos,
+  Music, Documents and Pictures folders; Firefox gets its connector from *Browser → Install / repair connector*.
+  Chrome-based browsers and the option *Start when I log in* are not available in the Flatpak yet.
+
+Both are built and smoke-tested on GitHub for every change. To run from source instead, see below.
+
 ## Install (Kubuntu / Ubuntu / Debian)
 ```bash
 sudo apt install python3-venv ffmpeg libxcb-cursor0     # ffmpeg: merging video/audio; libxcb-cursor0: Qt on X11

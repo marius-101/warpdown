@@ -38,7 +38,7 @@ def extension_dir() -> Path | None:
 
 
 def can_register() -> bool:
-    return IS_WINDOWS or installer_script() is not None
+    return IS_WINDOWS or osutil.FROZEN or installer_script() is not None
 
 
 def installer_script() -> Path | None:
@@ -176,6 +176,55 @@ def register_windows(chrome_extension_id: str = "") -> tuple[bool, str]:
     return True, "Registered for: " + ", ".join(done)
 
 
+SYSTEM_FIREFOX_DIRS = ("/usr/lib/mozilla/native-messaging-hosts", "/usr/lib64/mozilla/native-messaging-hosts",
+                       "/usr/local/lib/mozilla/native-messaging-hosts")
+
+
+def _manifest(host: str, kind: str, chrome_id: str = "") -> str:
+    base = {"name": HOST_NAME, "description": "Warpdown native host", "path": host, "type": "stdio"}
+    if kind == "firefox":
+        return json.dumps({**base, "allowed_extensions": FF_IDS}, indent=1)
+    return json.dumps({**base, "allowed_origins": [f"chrome-extension://{chrome_id}/"]}, indent=1)
+
+
+def register_unix(chrome_extension_id: str = "") -> tuple[bool, str]:
+    """Linux, for the installed program (no install.sh): write the host manifests for the browsers of this user.
+    In a Flatpak the browser must start the host through `flatpak run`, so a small wrapper script is used."""
+    home = Path.home()
+    flatpak_id = os.environ.get("FLATPAK_ID", "")
+    if flatpak_id:
+        wrapper = data_dir() / "warpdown-host-flatpak"
+        wrapper.write_text(f'#!/bin/sh\nexec flatpak run --command=/app/warpdown/warpdown-host {flatpak_id} "$@"\n')
+        wrapper.chmod(0o755)
+        host = str(wrapper)
+    else:
+        host = host_executable()
+    done = []
+
+    def write(folder: Path, kind: str, cid: str = "", path: str = "") -> None:
+        folder.mkdir(parents=True, exist_ok=True)
+        text = _manifest(path or host, kind, cid)
+        (folder / f"{HOST_NAME}.json").write_text(text)
+
+    write(home / ".mozilla" / "native-messaging-hosts", "firefox")
+    done.append("Firefox")
+    if (home / ".var" / "app" / FLATPAK_FIREFOX).exists() and not flatpak_id:
+        spawn = home / ".var" / "app" / FLATPAK_FIREFOX / ".mozilla" / "warpdown-host-flatpak"
+        spawn.write_text(f'#!/bin/sh\nexec flatpak-spawn --host "{host}"\n')
+        spawn.chmod(0o755)
+        write(spawn.parent / "native-messaging-hosts", "firefox", path=str(spawn))
+        done.append("Firefox (Flatpak)")
+    cid = chrome_extension_id.strip() or _saved_chrome_id()
+    if cid:
+        for d in CHROMIUM_CONFIG_DIRS:
+            if (home / ".config" / d).exists():
+                write(home / ".config" / d / "NativeMessagingHosts", "chrome", cid)
+                done.append(d.split("/")[-1])
+        (data_dir() / "native").mkdir(exist_ok=True)
+        (data_dir() / "native" / "chrome_id.txt").write_text(cid)
+    return True, "Registered for: " + ", ".join(done)
+
+
 def _saved_chrome_id() -> str:
     try:
         return (data_dir() / "native" / "chrome_id.txt").read_text().strip()
@@ -206,6 +255,8 @@ def registration_status() -> list[tuple[str, bool]]:
     if (home / ".var" / "app" / FLATPAK_FIREFOX).exists():
         out.append(("Firefox (Flatpak)", (home / ".var" / "app" / FLATPAK_FIREFOX / ".mozilla" /
                                           "native-messaging-hosts" / f"{HOST_NAME}.json").exists()))
+    out = [(n, ok or any(Path(d, f"{HOST_NAME}.json").exists() for d in SYSTEM_FIREFOX_DIRS)) if n == "Firefox" else (n, ok)
+           for n, ok in out]                                    # a .deb installs the Firefox manifest system-wide
     cfg = home / ".config"
     present = [d for d in CHROMIUM_CONFIG_DIRS if (cfg / d).exists()]
     if present:
@@ -219,6 +270,11 @@ def run_installer(chrome_extension_id: str = "") -> tuple[bool, str]:
     if IS_WINDOWS:
         try:
             return register_windows(chrome_extension_id)
+        except OSError as e:
+            return False, str(e)
+    if osutil.FROZEN or (installer_script() is None and not IS_WINDOWS and os.environ.get("FLATPAK_ID")):
+        try:
+            return register_unix(chrome_extension_id)
         except OSError as e:
             return False, str(e)
     script = installer_script()
