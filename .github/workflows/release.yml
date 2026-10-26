@@ -1,0 +1,76 @@
+name: Release
+
+# Push a version tag (git tag v0.9.1 && git push origin v0.9.1) to build every package and put them on a draft release.
+# The draft lets you write the release notes and check the files before publishing.
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+jobs:
+  version:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: The tag matches warpdown/__init__.py
+        run: |
+          v="$(python3 -c "import re,pathlib; print(re.search(r'__version__ = \"(.+?)\"', pathlib.Path('warpdown/__init__.py').read_text()).group(1))")"
+          [ "$GITHUB_REF_NAME" = "v$v" ] || { echo "::error::Tag $GITHUB_REF_NAME does not match __version__ $v"; exit 1; }
+
+  linux:
+    needs: version
+    uses: ./.github/workflows/linux.yml
+
+  windows:
+    needs: version
+    uses: ./.github/workflows/windows.yml
+
+  # Release Firefox only installs Mozilla-signed add-ons, so the signed warpdown.xpi of the last release is carried over
+  # while the add-on's version is unchanged. A new add-on version has to be signed on addons.mozilla.org first.
+  xpi:
+    needs: version
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Signed add-on from the last release
+        run: |
+          mkdir -p dist
+          want="$(python3 -c "import json; print(json.load(open('extension/manifest.json'))['version'])")"
+          if gh release download --repo "$GITHUB_REPOSITORY" --pattern warpdown.xpi --dir build/last 2>/dev/null; then
+            have="$(unzip -p build/last/warpdown.xpi manifest.json | python3 -c "import json,sys; print(json.load(sys.stdin)['version'])")"
+            unzip -l build/last/warpdown.xpi | grep -q 'META-INF/mozilla.rsa' || have="unsigned"
+          else
+            have="none"
+          fi
+          if [ "$have" = "$want" ]; then
+            cp build/last/warpdown.xpi dist/warpdown.xpi
+            echo "Reusing the signed add-on $have"
+          else
+            echo "::warning::The add-on is $want but the last release has $have. Build it with native/build_xpi.sh, have it signed on addons.mozilla.org and attach the signed warpdown.xpi to the draft by hand."
+          fi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warpdown-xpi
+          path: dist/warpdown.xpi
+          if-no-files-found: ignore
+
+  release:
+    needs: [linux, windows, xpi]
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Draft release with every package
+        run: |
+          ls -la dist
+          v="${GITHUB_REF_NAME#v}"
+          gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
+            --title "Warpdown $v" --notes "Release notes for Warpdown $v go here."
