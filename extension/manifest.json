@@ -3,6 +3,7 @@
   "name": "Warpdown Integration",
   "version": "0.8.0",
   "description": "Send downloads and detected videos to Warpdown.",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAwfBB9IR+USN8SKqVccKf5HGm/PoKBrRlgKcHgAt2MqyVTbFqo9o1EWdus6OzSg7dGGwVpp/czbcEVZ2rfs+l/C87Ir5EDUvJGVZsDNx9XuITHIMcR43IeMj+NWANISd/t6aSaM7txl5su0D/jYSwrtC1a/izYm/n+hjcMXoPLmXPgVucfoCsnwgXeqYWn86qvm6hmEV/TFIWV9kdsxa6UudoP+4XJNKwllH3wYnEHE7GtQSFRS28WlXZYJzSTxabMDt4n/2evMwEG57YrW+LHhOwbnsJodlpY2ovk7/aSLLQ2D+VTdwgKQrxu6RJL0slYgRUtlmtsf/wKs2InimkFwIDAQAB",
   "permissions": [
     "downloads",
     "nativeMessaging",

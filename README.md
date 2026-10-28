@@ -118,8 +118,15 @@ native/install.sh        # registers the native-messaging host and a desktop lau
 *Developers:* to test a build from source, run `native/build_xpi.sh` and load `dist/warpdown.xpi` from
 `about:debugging#/runtime/this-firefox` → *Load Temporary Add-on…*.
 
-**Chrome / Chromium / Brave** — load the `extension/` folder unpacked, copy the extension ID, then run
-`WARPDOWN_CHROME_EXTENSION_ID=<id> native/install.sh`.
+**Chrome / Brave / Edge / Vivaldi / Chromium** (not in the Chrome Web Store yet)
+1. Unzip **[warpdown-chrome.zip](https://github.com/marius-101/warpdown/releases/latest/download/warpdown-chrome.zip)**
+   (or use *Browser → Show extension folder* inside Warpdown, or `extension/` in a source checkout).
+2. Open the browser's extensions page (`chrome://extensions`, `brave://extensions`, …), turn on **Developer mode**
+   and press **Load unpacked**, then choose that folder. The extension always gets the ID
+   `ildepgmogicpnhgjimbjbceknoipnhjn`, so the connector needs no setup: the installed program registers it every
+   time it starts, and `native/install.sh` does it for a source checkout (start the browser once before running it).
+3. Browsers installed as a Snap or Flatpak (Ubuntu's `chromium` is a Snap) can't start the connector: use the
+   browser's own .deb. The Warpdown Flatpak doesn't support Chrome-family browsers yet.
 
 ### Using it
 - **Download all links:** click the toolbar icon → *Download all links on this page…* (or right-click the page). If

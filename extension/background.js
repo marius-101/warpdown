@@ -4,6 +4,22 @@ const media = {}; // tabId -> [{url, type, size}]
 const subsByTab = {}; // tabId -> [{url, lang, label}] detected .vtt/.srt/.ass requests
 console.log("[Warpdown] background loaded");
 
+// Chrome stops this script when idle (a service worker) and starts it again for the next event: keep what was detected
+// in session storage (cleared when the browser closes), or the popup would forget videos found before the pause.
+const session = api.storage.session;
+const merge = (into, saved) => {
+  for (const [tab, list] of Object.entries(saved || {}))
+    into[tab] = [...list, ...(into[tab] || []).filter(m => !list.some(x => x.url === m.url))];
+};
+const restored = session ? session.get(["media", "subsByTab"]).then(r => { merge(media, r.media); merge(subsByTab, r.subsByTab); },
+  () => {}) : Promise.resolve();
+let saveTimer = 0;
+function saveDetected() {
+  if (!session) return;
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(() => restored.then(() => session.set({ media, subsByTab })).catch(() => {}), 300);
+}
+
 async function cookieHeader(url) {
   try {
     const cs = await api.cookies.getAll({ url });
@@ -101,13 +117,13 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   const isSub = /\.(vtt|srt|ass|ssa)(\?|$)/i.test(d.url) || /text\/vtt|x-subrip|x-ssa/i.test(type);
   if (isSub && d.statusCode < 400 && !/thumb|sprite|storyboard/i.test(d.url)) {
     const sl = (subsByTab[d.tabId] = subsByTab[d.tabId] || []);
-    if (!sl.some(x => x.url === d.url)) sl.push({ url: d.url, lang: "", label: "" });
+    if (!sl.some(x => x.url === d.url)) { sl.push({ url: d.url, lang: "", label: "" }); saveDetected(); }
     return;
   }
   const isHls = /mpegurl/i.test(type) || /\.m3u8(\?|$)/i.test(d.url);
   if (isHls && d.statusCode < 400) {
     const l = (media[d.tabId] = media[d.tabId] || []);
-    if (!l.some(m => m.url === d.url)) l.push({ url: d.url, type: "hls", size: 0 });
+    if (!l.some(m => m.url === d.url)) { l.push({ url: d.url, type: "hls", size: 0 }); saveDetected(); }
     return;
   }
   const isMedia = (/^(video|audio)\//.test(type) && !/mp2t/.test(type)) || /\.(mp4|webm|mkv|mp3|m4a|flv)(\?|$)/i.test(d.url);
@@ -115,12 +131,19 @@ api.webRequest.onHeadersReceived.addListener((d) => {
   const size = parseInt((h["content-range"] || "").split("/")[1] || h["content-length"] || "0", 10);
   if (!size || size < 1024 * 1024) return; // ignore tiny/unknown-size files (UI sounds, segments, trackers)
   const list = (media[d.tabId] = media[d.tabId] || []);
-  if (!list.some(m => m.url === d.url)) list.push({ url: d.url, type, size });
+  if (!list.some(m => m.url === d.url)) { list.push({ url: d.url, type, size }); saveDetected(); }
 }, { urls: ["<all_urls>"] }, ["responseHeaders"]);
-api.tabs.onRemoved.addListener(id => { delete media[id]; delete subsByTab[id]; });
-api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) { delete media[id]; delete subsByTab[id]; } });
+function forgetTab(id) { if (media[id] || subsByTab[id]) { delete media[id]; delete subsByTab[id]; saveDetected(); } }
+api.tabs.onRemoved.addListener(id => restored.then(() => forgetTab(id)));
+api.tabs.onUpdated.addListener((id, ch) => { if (ch.status === "loading" && ch.url) restored.then(() => forgetTab(id)); });
 
+// Answer only once the detected media is restored (right after Chrome restarted this script).
 api.runtime.onMessage.addListener((msg, sender, reply) => {
+  restored.then(() => handleMessage(msg, sender, reply));
+  return true;
+});
+
+function handleMessage(msg, sender, reply) {
   if (msg.type === "ping") {
     api.runtime.sendNativeMessage(HOST, { action: "ping" }).then(
       r => reply({ ok: true, r }), e => reply({ ok: false, error: String(e && e.message || e) }));
@@ -163,5 +186,4 @@ api.runtime.onMessage.addListener((msg, sender, reply) => {
   }
   if (msg.type === "getMedia") reply(media[msg.tabId] || []);
   if (msg.type === "download") sendToWarpdown(msg.url, { referrer: msg.referrer, filename: msg.filename, subs: msg.subs || (subsByTab[msg.tabId] || []) }).then(reply);
-  return true;
-});
+}

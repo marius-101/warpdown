@@ -61,8 +61,8 @@ def main(argv: list[str] | None = None) -> int:
     apply_font(saved_font_size())          # text size chosen in Settings (0 = system default)
     themes.apply_theme(*saved_theme())    # style + mode chosen in Settings
 
-    if osutil.FROZEN and (osutil.IS_WINDOWS or os.environ.get("FLATPAK_ID")):   # keep the browser connector registered
-        try:                                                                   # (cheap; current user only)
+    if osutil.FROZEN:                     # keep the browser connector registered, for Firefox and the Chrome family
+        try:                              # (cheap; current user only)
             browsers.register_windows() if osutil.IS_WINDOWS else browsers.register_unix()
         except OSError:
             pass

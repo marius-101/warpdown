@@ -954,12 +954,14 @@ class ExtensionDialog(QDialog):
         lay.addWidget(ff)
 
         # ---- Chrome / Chromium / Brave ----
-        ch = QGroupBox("Chrome, Chromium, Brave")
+        ch = QGroupBox("Chrome, Brave, Edge, Vivaldi, Chromium")
         cl = QVBoxLayout(ch)
         csteps = QLabel("1. Press <b>Open extensions page</b> and turn on <i>Developer mode</i>.<br>"
                         "2. Press <b>Load unpacked</b> and choose the folder (<i>Show extension folder</i>).<br>"
-                        "3. Copy the extension's <b>ID</b> from that page, paste it below and press "
-                        "<b>Register</b>.")
+                        "3. Press <b>Install / repair connector</b> below (Warpdown also does this when it starts).<br>"
+                        "<small>Browsers installed as a Snap or Flatpak can't reach the connector: use the "
+                        "browser's own .deb. Only if the extensions page shows an ID other than "
+                        f"<i>{browsers.CHROME_EXTENSION_ID}</i>, paste it here and press <b>Register</b>.</small>")
         csteps.setWordWrap(True)
         cl.addWidget(csteps)
         row = QHBoxLayout()
@@ -976,7 +978,7 @@ class ExtensionDialog(QDialog):
         cl.addLayout(row)
         row = QHBoxLayout()
         self.chrome_id = QLineEdit()
-        self.chrome_id.setPlaceholderText("Extension ID, e.g. abcdefghijklmnopabcdefghijklmnop")
+        self.chrome_id.setPlaceholderText("Different extension ID (optional)")
         self.btn_reg = QPushButton("Register")
         self.btn_reg.clicked.connect(self._register_chrome)
         row.addWidget(self.chrome_id, 1); row.addWidget(self.btn_reg)
@@ -989,8 +991,8 @@ class ExtensionDialog(QDialog):
         lay.addWidget(self.result)
         bottom = QHBoxLayout()
         self.btn_fix = QPushButton("Install / repair connector")
-        self.btn_fix.setToolTip("Registers Warpdown's browser connector for Firefox and any Chrome-family browser "
-                                "that already has the ID saved.")
+        self.btn_fix.setToolTip("Registers Warpdown's browser connector for Firefox and the Chrome-family browsers "
+                                "on this computer.")
         self.btn_fix.clicked.connect(lambda: self._run_installer(""))
         proj = QPushButton("Project page")
         proj.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(browsers.PROJECT_URL)))
