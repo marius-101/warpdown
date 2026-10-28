@@ -1,7 +1,8 @@
 name: Release
 
 # Push a version tag (git tag v0.9.1 && git push origin v0.9.1) to build every package and put them on a draft release.
-# The draft lets you write the release notes and check the files before publishing.
+# The draft's notes are drafted from the commits since the previous tag (packaging/release_notes.py): edit them and
+# check the files before publishing.
 on:
   push:
     tags: ["v*"]
@@ -64,6 +65,11 @@ jobs:
     env:
       GH_TOKEN: ${{ github.token }}
     steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0          # every commit and tag, to find the previous release
+      - name: Notes from the commits since the previous tag
+        run: python3 packaging/release_notes.py "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" | tee notes.md
       - uses: actions/download-artifact@v4
         with:
           path: dist
@@ -73,4 +79,4 @@ jobs:
           ls -la dist
           v="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" dist/* --repo "$GITHUB_REPOSITORY" --draft --verify-tag \
-            --title "Warpdown $v" --notes "Release notes for Warpdown $v go here."
+            --title "Warpdown $v" --notes-file notes.md
