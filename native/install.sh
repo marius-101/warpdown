@@ -27,7 +27,12 @@ done
 # Firefox uses allowed_extensions, Chromium-family uses allowed_origins.
 FF_ID="warpdown@marius-101.github.io"            # the ID the published add-on uses
 FF_ID_DEV="warpdown@warpdown.local"                # earlier temporary development builds
-CHROME_ID="${WARPDOWN_CHROME_EXTENSION_ID:-}"   # set after loading the unpacked extension
+CHROME_ID="ildepgmogicpnhgjimbjbceknoipnhjn"    # fixed by the "key" in extension/manifest.json
+CHROME_ORIGINS="\"chrome-extension://$CHROME_ID/\""
+EXTRA_ID="${WARPDOWN_CHROME_EXTENSION_ID:-}"     # optional: a copy of the extension with a different ID
+if [ -n "$EXTRA_ID" ] && [ "$EXTRA_ID" != "$CHROME_ID" ]; then
+  CHROME_ORIGINS="$CHROME_ORIGINS,\"chrome-extension://$EXTRA_ID/\""
+fi
 
 write_manifest() { # dir type
   mkdir -p "$1"
@@ -35,15 +40,15 @@ write_manifest() { # dir type
     cat > "$1/$NAME.json" <<JSON
 {"name":"$NAME","description":"Warpdown native host","path":"$WRAPPER","type":"stdio","allowed_extensions":["$FF_ID","$FF_ID_DEV"]}
 JSON
-  elif [ -n "$CHROME_ID" ]; then
+  else
     cat > "$1/$NAME.json" <<JSON
-{"name":"$NAME","description":"Warpdown native host","path":"$WRAPPER","type":"stdio","allowed_origins":["chrome-extension://$CHROME_ID/"]}
+{"name":"$NAME","description":"Warpdown native host","path":"$WRAPPER","type":"stdio","allowed_origins":[$CHROME_ORIGINS]}
 JSON
   fi
 }
 write_manifest "$HOME/.mozilla/native-messaging-hosts" firefox
 for d in google-chrome chromium BraveSoftware/Brave-Browser vivaldi microsoft-edge; do
-  write_manifest "$HOME/.config/$d/NativeMessagingHosts" chrome
+  if [ -d "$HOME/.config/$d" ]; then write_manifest "$HOME/.config/$d/NativeMessagingHosts" chrome; fi
 done
 
 # Flatpak Firefox: the sandbox cannot run host binaries directly, so go through flatpak-spawn.
@@ -74,4 +79,4 @@ Categories=Network;FileTransfer;
 MimeType=x-scheme-handler/magnet;application/x-bittorrent;
 Terminal=false
 DESK
-echo "Installed. Firefox host registered; Chromium-family hosts need WARPDOWN_CHROME_EXTENSION_ID (see README)."
+echo "Installed. Host registered for Firefox and the Chrome-family browsers found (start a browser once, then rerun if it was missing)."

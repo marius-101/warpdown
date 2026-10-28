@@ -59,8 +59,21 @@ jobs:
           path: dist/warpdown.xpi
           if-no-files-found: ignore
 
+  # Chrome-family browsers load the extension unpacked from this zip (no signing needed); it is also what a Chrome Web
+  # Store upload would start from.
+  chrome:
+    needs: version
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash native/build_chrome_zip.sh
+      - uses: actions/upload-artifact@v4
+        with:
+          name: warpdown-chrome
+          path: dist/warpdown-chrome.zip
+
   release:
-    needs: [linux, windows, xpi]
+    needs: [linux, windows, xpi, chrome]
     runs-on: ubuntu-latest
     env:
       GH_TOKEN: ${{ github.token }}

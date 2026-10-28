@@ -691,7 +691,8 @@ def test_unix_registration_writes_manifests(tmp_path, monkeypatch):
     assert ok and "Firefox" in msg and "google-chrome" in msg
     ff = json.loads((tmp_path / ".mozilla/native-messaging-hosts/org.warpdown.host.json").read_text())
     ch = json.loads((tmp_path / ".config/google-chrome/NativeMessagingHosts/org.warpdown.host.json").read_text())
-    assert ff["allowed_extensions"] and ch["allowed_origins"] == ["chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]
+    assert ff["allowed_extensions"] and ch["allowed_origins"] == [
+        f"chrome-extension://{browsers.CHROME_EXTENSION_ID}/", "chrome-extension://abcdefghijklmnopabcdefghijklmnop/"]
     assert ff["path"] == ch["path"]
     monkeypatch.setenv("FLATPAK_ID", "io.github.marius101.Warpdown")                  # inside a Flatpak: wrapper script
     ok, _ = browsers.register_unix()

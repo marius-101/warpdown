@@ -19,6 +19,10 @@ FIREFOX_ADDON_URL = ""      # e.g. https://addons.mozilla.org/firefox/addon/warp
 # The Mozilla-signed add-on, attached to every GitHub release as "warpdown.xpi" (Firefox offers to install it).
 FIREFOX_XPI_URL = PROJECT_URL + "/releases/latest/download/warpdown.xpi"
 CHROME_STORE_URL = ""       # e.g. https://chromewebstore.google.com/detail/...
+# The "key" in extension/manifest.json fixes the ID an unpacked copy gets in Chrome-family browsers, wherever its folder is,
+# so the connector can be registered for it without the user copying the ID. (A Chrome Web Store copy gets its own ID:
+# add it to allowed_origins too once there is one.)
+CHROME_EXTENSION_ID = "ildepgmogicpnhgjimbjbceknoipnhjn"
 HOST_NAME = "org.warpdown.host"
 
 FLATPAK_FIREFOX = "org.mozilla.firefox"
@@ -47,39 +51,58 @@ def installer_script() -> Path | None:
 
 
 def firefox_manifest(text: str) -> str:
-    """The manifest as Firefox wants it: `background.service_worker` is Chrome's key (Firefox uses `scripts`),
-    and Mozilla's validator warns about it, so the Firefox package leaves it out."""
+    """The manifest as Firefox wants it: `background.service_worker` and `key` are Chrome's keys (Firefox uses
+    `scripts` and the gecko ID), and Mozilla's validator warns about them, so the Firefox package leaves them out."""
     m = json.loads(text)
     m.get("background", {}).pop("service_worker", None)
+    m.pop("key", None)
     return json.dumps(m, indent=2, ensure_ascii=False) + "\n"
 
 
-def _zip_extension(src: Path, out: Path) -> None:
+def chrome_manifest(text: str) -> str:
+    """The manifest as Chrome wants it: without Firefox's `background.scripts` and `browser_specific_settings`,
+    which Chrome shows as errors on its extensions page."""
+    m = json.loads(text)
+    m.get("background", {}).pop("scripts", None)
+    m.pop("browser_specific_settings", None)
+    return json.dumps(m, indent=2, ensure_ascii=False) + "\n"
+
+
+def _zip_extension(src: Path, out: Path, manifest=firefox_manifest) -> None:
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as z:
         for f in sorted(src.rglob("*")):
             if not f.is_file():
                 continue
             name = f.relative_to(src).as_posix()
             if name == "manifest.json":
-                z.writestr(name, firefox_manifest(f.read_text(encoding="utf-8")))
+                z.writestr(name, manifest(f.read_text(encoding="utf-8")))
             else:
                 z.write(f, name)
 
 
-def build_xpi() -> Path | None:
-    """Package the extension as warpdown.xpi (Firefox needs a single file). None if the extension isn't bundled."""
+def _build(file_name: str, manifest) -> Path | None:
     src = extension_dir()
     if src is None:
         return None
     for out_dir in (project_root() / "dist", data_dir()):
         try:
             out_dir.mkdir(exist_ok=True)
-            out = out_dir / "warpdown.xpi"
-            _zip_extension(src, out)
+            out = out_dir / file_name
+            _zip_extension(src, out, manifest)
             return out
         except OSError:
             continue
     return None
+
+
+def build_xpi() -> Path | None:
+    """Package the extension as warpdown.xpi (Firefox needs a single file). None if the extension isn't bundled."""
+    return _build("warpdown.xpi", firefox_manifest)
+
+
+def build_chrome_zip() -> Path | None:
+    """Package the extension as warpdown-chrome.zip, attached to releases: unzip it and use Load unpacked."""
+    return _build("warpdown-chrome.zip", chrome_manifest)
 
 
 def _is_snap_stub(path: str) -> bool:
@@ -165,14 +188,12 @@ def register_windows(chrome_extension_id: str = "") -> tuple[bool, str]:
     ff.write_text(json.dumps({**base, "allowed_extensions": FF_IDS}, indent=1))
     done = ["Firefox"]
     winreg.SetValue(winreg.HKEY_CURRENT_USER, WINDOWS_KEYS["Firefox"] + "\\" + HOST_NAME, winreg.REG_SZ, str(ff))
-    cid = chrome_extension_id.strip() or _saved_chrome_id()
-    if cid:
-        ch = folder / f"{HOST_NAME}.chrome.json"
-        ch.write_text(json.dumps({**base, "allowed_origins": [f"chrome-extension://{cid}/"]}, indent=1))
-        for name in ("Chrome", "Edge", "Brave"):
-            winreg.SetValue(winreg.HKEY_CURRENT_USER, WINDOWS_KEYS[name] + "\\" + HOST_NAME, winreg.REG_SZ, str(ch))
-            done.append(name)
-        (folder / "chrome_id.txt").write_text(cid)
+    ch = folder / f"{HOST_NAME}.chrome.json"
+    ch.write_text(json.dumps({**base, "allowed_origins": chrome_origins(chrome_extension_id)}, indent=1))
+    for name in ("Chrome", "Edge", "Brave"):
+        winreg.SetValue(winreg.HKEY_CURRENT_USER, WINDOWS_KEYS[name] + "\\" + HOST_NAME, winreg.REG_SZ, str(ch))
+        done.append(name)
+    _save_chrome_id(chrome_extension_id)
     return True, "Registered for: " + ", ".join(done)
 
 
@@ -180,11 +201,21 @@ SYSTEM_FIREFOX_DIRS = ("/usr/lib/mozilla/native-messaging-hosts", "/usr/lib64/mo
                        "/usr/local/lib/mozilla/native-messaging-hosts")
 
 
+def chrome_origins(extra_id: str = "") -> list[str]:
+    """The extensions a Chrome-family browser lets talk to the connector: Warpdown's fixed ID, plus an ID the user
+    entered (a copy of the extension without the manifest key, or from a store)."""
+    ids = [CHROME_EXTENSION_ID]
+    for cid in (extra_id.strip(), _saved_chrome_id()):
+        if cid and cid not in ids:
+            ids.append(cid)
+    return [f"chrome-extension://{cid}/" for cid in ids]
+
+
 def _manifest(host: str, kind: str, chrome_id: str = "") -> str:
     base = {"name": HOST_NAME, "description": "Warpdown native host", "path": host, "type": "stdio"}
     if kind == "firefox":
         return json.dumps({**base, "allowed_extensions": FF_IDS}, indent=1)
-    return json.dumps({**base, "allowed_origins": [f"chrome-extension://{chrome_id}/"]}, indent=1)
+    return json.dumps({**base, "allowed_origins": chrome_origins(chrome_id)}, indent=1)
 
 
 def register_unix(chrome_extension_id: str = "") -> tuple[bool, str]:
@@ -214,15 +245,19 @@ def register_unix(chrome_extension_id: str = "") -> tuple[bool, str]:
         spawn.chmod(0o755)
         write(spawn.parent / "native-messaging-hosts", "firefox", path=str(spawn))
         done.append("Firefox (Flatpak)")
-    cid = chrome_extension_id.strip() or _saved_chrome_id()
-    if cid:
-        for d in CHROMIUM_CONFIG_DIRS:
-            if (home / ".config" / d).exists():
-                write(home / ".config" / d / "NativeMessagingHosts", "chrome", cid)
-                done.append(d.split("/")[-1])
+    for d in CHROMIUM_CONFIG_DIRS:
+        if (home / ".config" / d).exists():
+            write(home / ".config" / d / "NativeMessagingHosts", "chrome", chrome_extension_id)
+            done.append(d.split("/")[-1])
+    _save_chrome_id(chrome_extension_id)
+    return True, "Registered for: " + ", ".join(done)
+
+
+def _save_chrome_id(cid: str) -> None:
+    cid = cid.strip()
+    if cid and cid != CHROME_EXTENSION_ID:
         (data_dir() / "native").mkdir(exist_ok=True)
         (data_dir() / "native" / "chrome_id.txt").write_text(cid)
-    return True, "Registered for: " + ", ".join(done)
 
 
 def _saved_chrome_id() -> str:

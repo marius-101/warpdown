@@ -219,6 +219,7 @@ def test_firefox_package_omits_chrome_only_key_but_source_keeps_it(tmp_path, mon
     fx = json.loads(z.read("manifest.json"))
     assert "service_worker" not in fx["background"] and fx["background"]["scripts"] == ["background.js"]
     assert "service_worker" in _manifest()["background"]                    # the Chrome build still needs it
+    assert "key" not in fx and "key" in _manifest()
     assert {"background.js", "content.js", "popup.html", "popup.js", "icons/128.png"} <= set(z.namelist())
 
 
@@ -227,3 +228,58 @@ def test_installer_trusts_the_published_and_the_development_id():
     s = (Path(__file__).resolve().parent.parent / "native" / "install.sh").read_text()
     assert 'FF_ID="warpdown@marius-101.github.io"' in s and 'FF_ID_DEV="warpdown@warpdown.local"' in s
     assert s.count('"allowed_extensions":["$FF_ID","$FF_ID_DEV"]') == 2        # regular + Flatpak Firefox
+
+
+# ---------------- Chrome-family package ----------------
+def test_manifest_key_gives_the_fixed_chrome_id():
+    import base64
+    import hashlib
+    der = base64.b64decode(_manifest()["key"])
+    cid = "".join(chr(ord("a") + int(c, 16)) for c in hashlib.sha256(der).hexdigest()[:32])  # how Chrome derives it
+    assert cid == browsers.CHROME_EXTENSION_ID
+
+
+def test_chrome_package_omits_firefox_only_keys(tmp_path, monkeypatch):
+    import json
+    import zipfile
+    from pathlib import Path
+    root = Path(__file__).resolve().parent.parent
+    monkeypatch.setattr(browsers, "project_root", lambda: tmp_path)
+    monkeypatch.setattr(browsers, "extension_dir", lambda: root / "extension")
+    out = browsers.build_chrome_zip()
+    assert out == tmp_path / "dist" / "warpdown-chrome.zip"
+    z = zipfile.ZipFile(out)
+    m = json.loads(z.read("manifest.json"))
+    assert m["background"] == {"service_worker": "background.js"} and "browser_specific_settings" not in m
+    assert m["key"] == _manifest()["key"]
+    assert {"background.js", "content.js", "popup.html", "popup.js", "icons/128.png"} <= set(z.namelist())
+
+
+def test_chrome_origins_always_include_the_fixed_id(tmp_path, monkeypatch):
+    monkeypatch.setattr(browsers, "data_dir", lambda: tmp_path)
+    fixed = f"chrome-extension://{browsers.CHROME_EXTENSION_ID}/"
+    assert browsers.chrome_origins() == [fixed]
+    assert browsers.chrome_origins(browsers.CHROME_EXTENSION_ID) == [fixed]
+    browsers._save_chrome_id("b" * 32)                                      # an extra ID entered once is kept
+    assert browsers.chrome_origins() == [fixed, f"chrome-extension://{'b' * 32}/"]
+
+
+@linux_only
+def test_unix_registration_covers_chrome_without_an_id(tmp_path, monkeypatch):
+    import json
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("FLATPAK_ID", raising=False)
+    monkeypatch.setattr(browsers.Path, "home", classmethod(lambda cls: tmp_path))
+    monkeypatch.setattr(browsers, "data_dir", lambda: tmp_path / "data")
+    (tmp_path / "data").mkdir()
+    (tmp_path / ".config/BraveSoftware/Brave-Browser").mkdir(parents=True)
+    ok, msg = browsers.register_unix()
+    assert ok and "Brave-Browser" in msg
+    m = json.loads((tmp_path / ".config/BraveSoftware/Brave-Browser/NativeMessagingHosts/org.warpdown.host.json").read_text())
+    assert m["allowed_origins"] == [f"chrome-extension://{browsers.CHROME_EXTENSION_ID}/"]
+
+
+def test_installer_script_uses_the_fixed_chrome_id():
+    from pathlib import Path
+    s = (Path(__file__).resolve().parent.parent / "native" / "install.sh").read_text()
+    assert f'CHROME_ID="{browsers.CHROME_EXTENSION_ID}"' in s
