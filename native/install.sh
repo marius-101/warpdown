@@ -66,6 +66,23 @@ JSON
   echo "Flatpak Firefox detected. Also run once:  flatpak override --user --talk-name=org.freedesktop.Flatpak org.mozilla.firefox"
 fi
 
+# Flatpak Chrome-family browsers: same flatpak-spawn trick, registered in the browser's own config folder.
+for entry in com.google.Chrome:google-chrome org.chromium.Chromium:chromium com.brave.Browser:BraveSoftware/Brave-Browser; do
+  APP="${entry%%:*}"; CFG="${entry#*:}"
+  FP="$HOME/.var/app/$APP"
+  [ -d "$FP" ] || continue
+  mkdir -p "$FP/config/$CFG/NativeMessagingHosts"
+  cat > "$FP/config/warpdown-host-flatpak" <<FPW
+#!/bin/sh
+exec flatpak-spawn --host "$WRAPPER"
+FPW
+  chmod +x "$FP/config/warpdown-host-flatpak"
+  cat > "$FP/config/$CFG/NativeMessagingHosts/$NAME.json" <<JSON
+{"name":"$NAME","description":"Warpdown native host","path":"$FP/config/warpdown-host-flatpak","type":"stdio","allowed_origins":[$CHROME_ORIGINS]}
+JSON
+  echo "Flatpak $APP detected. Also run once:  flatpak override --user --talk-name=org.freedesktop.Flatpak $APP"
+done
+
 mkdir -p "$HOME/.local/share/applications" "$HOME/.local/share/icons/hicolor/scalable/apps"
 cp "$ROOT/warpdown/assets/warpdown.svg" "$HOME/.local/share/icons/hicolor/scalable/apps/warpdown.svg"
 cat > "$HOME/.local/share/applications/warpdown.desktop" <<DESK
