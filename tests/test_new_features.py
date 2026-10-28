@@ -571,6 +571,54 @@ def test_fetching_the_latest_release(monkeypatch):
         updates.fetch_latest()
 
 
+def test_update_notice_offers_the_file_that_fits_this_install(monkeypatch, tmp_path):
+    from warpdown import osutil, updates
+    assets = [{"name": n, "browser_download_url": f"https://dl/{n}"} for n in
+              ("warpdown_0.9.1_amd64.deb", "warpdown-0.9.1.flatpak", "warpdown-setup-0.9.1.exe",
+               "warpdown-windows-portable-0.9.1.zip", "warpdown.xpi")]
+    assert updates.pick_download(assets, "deb") == ("warpdown_0.9.1_amd64.deb", "https://dl/warpdown_0.9.1_amd64.deb")
+    assert updates.pick_download(assets, "flatpak")[0] == "warpdown-0.9.1.flatpak"
+    assert updates.pick_download(assets, "installer")[0] == "warpdown-setup-0.9.1.exe"
+    assert updates.pick_download(assets, "portable")[0] == "warpdown-windows-portable-0.9.1.zip"
+    assert updates.pick_download(assets, "source") == ("", "") and updates.pick_download([], "deb") == ("", "")
+    assert "sudo apt install ./warpdown_0.9.1_amd64.deb" in updates.how_to_update("deb", "warpdown_0.9.1_amd64.deb")
+    assert "--reinstall warpdown-0.9.1.flatpak" in updates.how_to_update("flatpak", "warpdown-0.9.1.flatpak")
+    assert "{file}" not in updates.how_to_update("deb", "") and "git pull" in updates.how_to_update("source")
+
+    monkeypatch.delenv("FLATPAK_ID", raising=False)
+    monkeypatch.setattr(osutil, "FROZEN", False)
+    assert updates.install_kind() == "source"
+    monkeypatch.setenv("FLATPAK_ID", "io.github.marius101.Warpdown")
+    assert updates.install_kind() == "flatpak"
+    monkeypatch.delenv("FLATPAK_ID")
+    monkeypatch.setattr(osutil, "FROZEN", True)
+    monkeypatch.setattr(osutil, "IS_WINDOWS", True)
+    monkeypatch.setattr(osutil, "app_dir", lambda: tmp_path)
+    assert updates.install_kind() == "portable"
+    (tmp_path / "unins000.exe").write_bytes(b"")
+    assert updates.install_kind() == "installer"
+    monkeypatch.setattr(osutil, "IS_WINDOWS", False)
+    monkeypatch.setattr(updates.sys, "platform", "linux")
+    assert updates.install_kind() == ""
+    monkeypatch.setattr(osutil, "app_dir", lambda: updates.Path("/opt/warpdown"))
+    assert updates.install_kind() == "deb"
+
+    class R:
+        status_code = 200
+
+        def raise_for_status(self):
+            pass
+
+        def json(self):
+            return {"tag_name": "v0.9.1", "html_url": "https://x/r", "assets": assets}
+
+    monkeypatch.setattr(updates.httpx, "get", lambda *a, **k: R())
+    version, url, hint = updates.check()
+    assert (version, url) == ("0.9.1", "https://dl/warpdown_0.9.1_amd64.deb") and "apt install" in hint
+    monkeypatch.setattr(osutil, "app_dir", lambda: tmp_path)                  # a build nobody published: the page
+    assert updates.check()[1] == "https://x/r"
+
+
 def test_window_shows_an_update_notice_only_when_newer(m, qapp, tmp_path, monkeypatch):
     from PySide6.QtCore import QSettings
     from warpdown import gui, __version__
@@ -581,8 +629,9 @@ def test_window_shows_an_update_notice_only_when_newer(m, qapp, tmp_path, monkey
     try:
         win._on_update_result(__version__, "https://x/r", "", False)               # same version: nothing to say
         assert win.update_label.isHidden() and shown == []
-        win._on_update_result("99.0.0", "https://x/r", "", False)
+        win._on_update_result("99.0.0", "https://x/r", "", False, "Run the installer.")
         assert not win.update_label.isHidden() and "99.0.0" in win.update_label.text() and len(shown) == 1
+        assert win.update_label.toolTip() == "Run the installer." and "Run the installer." in shown[0][1]
         win._on_update_result("99.0.0", "https://x/r", "", False)                 # the pop-up appears once per version
         assert len(shown) == 1
         win._on_update_result("", "", "no network", True)                          # errors only matter when asked for
