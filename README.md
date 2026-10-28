@@ -38,7 +38,8 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Search** the list (`Ctrl+F`) and **statistics** (*Statistics* in the toolbar): downloaded today, this week, this
   month and in total, a 14-day chart, and a breakdown by file type
 - **Update notice** — about once a day Warpdown asks GitHub for the newest release and shows *Update available* in the
-  status bar (once as a tray message). It never installs anything by itself; switch it off in *Settings*
+  status bar (once as a tray message). The link is the file that fits your copy (`.deb`, Flatpak, Windows installer or
+  portable zip) and the notice says how to install it. It never installs anything by itself; switch it off in *Settings*
 - **Plain-language errors** — a failed download says what went wrong and what to try; the technical text is in the
   tooltip and *Copy error details*
 - **IDM-style category folders** — Video, Music, Compressed, Documents, Programs, Images, Other — created automatically;

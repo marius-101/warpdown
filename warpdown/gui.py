@@ -1208,10 +1208,10 @@ SettingsDialog._update_ytdlp, SettingsDialog._on_yt_updated, SettingsDialog._ope
 
 def _update_worker(q, manual: bool) -> None:
     try:
-        version, url = updates.fetch_latest()
-        q.put(("update", (version, url, "", manual)))
+        version, url, hint = updates.check()
+        q.put(("update", (version, url, "", manual, hint)))
     except Exception as e:  # noqa: BLE001
-        q.put(("update", ("", "", str(e) or e.__class__.__name__, manual)))
+        q.put(("update", ("", "", str(e) or e.__class__.__name__, manual, "")))
 
 
 class BarChart(QWidget):
@@ -1759,7 +1759,7 @@ class MainWindow(QMainWindow):
             self.status.showMessage("Checking for updates…", 5000)
         threading.Thread(target=_update_worker, args=(self._update_inbox.queue, manual), daemon=True).start()
 
-    def _on_update_result(self, version: str, url: str, error: str, manual: bool) -> None:
+    def _on_update_result(self, version: str, url: str, error: str, manual: bool, hint: str = "") -> None:
         if error:
             if manual:
                 self.status.showMessage(f"Could not check for updates: {error}", 8000)
@@ -1767,11 +1767,13 @@ class MainWindow(QMainWindow):
         QSettings().setValue("last_update_check", time.time())
         if updates.is_newer(version, __version__):
             self.update_label.setText(f'<a href="{html.escape(url)}">Update available: {html.escape(version)}</a>')
+            self.update_label.setToolTip(hint)
             self.update_label.show()
             if QSettings().value("update_notified") != version or manual:
                 QSettings().setValue("update_notified", version)
                 self.tray.showMessage("Warpdown update", f"Version {version} is available (you have {__version__}). "
-                                      "Click “Update available” in the status bar.", QSystemTrayIcon.Information, 8000)
+                                      f"Click “Update available” in the status bar. {hint}".rstrip(),
+                                      QSystemTrayIcon.Information, 8000)
         else:
             self.update_label.hide()
             if manual:
