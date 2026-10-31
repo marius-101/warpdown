@@ -256,3 +256,31 @@ def test_tray_checkbox_toggles_the_setting(env):
     assert w.clip.enabled and str(QSettings().value("clipboard_watch")).lower() == "true"
     w.tray_clip.setChecked(False)
     assert not w.clip.enabled
+
+
+@pytest.mark.parametrize("action,expect_file,expect_dir", [(gui.DONE_NOTHING, False, False),
+                                                           (gui.DONE_OPEN_FILE, True, False),
+                                                           (gui.DONE_OPEN_FOLDER, False, True)])
+def test_download_complete_action(env, monkeypatch, action, expect_file, expect_dir):
+    from warpdown.manager import COMPLETED
+    w, m, tmp = env
+    QSettings().setValue("done_action", action)
+    opened = []
+    monkeypatch.setattr(gui.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+    monkeypatch.setattr(w.tray, "showMessage", lambda *a, **k: None)
+    it = m.add("http://127.0.0.1:1/a.bin", directory=str(tmp / "dl"))
+    it.filename = "a.bin"
+    it.status = COMPLETED
+    w._notify_done(it.id)
+    assert (str(it.path) in opened) == expect_file
+    assert (it.directory in opened) == expect_dir
+    opened.clear()
+    w._open_last_done()                                              # clicking the notification shows the folder
+    assert opened == [it.directory]
+
+
+def test_settings_dialog_saves_the_complete_action(env):
+    w, m, _ = env
+    d = gui.SettingsDialog(w, m)
+    d.done.setCurrentIndex(d.done.findData(gui.DONE_OPEN_FOLDER))
+    assert d.done.currentData() == gui.DONE_OPEN_FOLDER

@@ -1056,6 +1056,11 @@ class ExtensionDialog(QDialog):
         self._refresh_status()
 
 
+DONE_NOTHING, DONE_OPEN_FILE, DONE_OPEN_FOLDER = "nothing", "file", "folder"
+DONE_ACTIONS = {DONE_NOTHING: "Only show a notification", DONE_OPEN_FILE: "Open the file",
+                DONE_OPEN_FOLDER: "Open the folder"}
+
+
 class SettingsDialog(QDialog):
     font_preview = Signal(int)       # emitted while choosing, so the whole app resizes live
     theme_preview = Signal(str, str)  # (style, mode), likewise
@@ -1103,6 +1108,10 @@ class SettingsDialog(QDialog):
         self.sums.setChecked(str(s.value("find_checksums", "true")).lower() == "true")
         self.retry = QCheckBox("Retry failed downloads automatically (temporary network or server problems)")
         self.retry.setChecked(str(s.value("auto_retry", "true")).lower() == "true")
+        self.done = QComboBox()
+        for key, label in DONE_ACTIONS.items():
+            self.done.addItem(label, key)
+        self.done.setCurrentIndex(max(0, self.done.findData(str(s.value("done_action", DONE_NOTHING)))))
         self.retries = QSpinBox(); self.retries.setRange(1, 20)
         self.retries.setValue(int(s.value("max_retries", 5)))
         self.clip = QCheckBox("Watch the clipboard for download links")
@@ -1148,6 +1157,7 @@ class SettingsDialog(QDialog):
         urow.addWidget(self.upd_now)
         form.addRow("", urow)
         form.addRow("", self.retry)
+        form.addRow("When a download completes:", self.done)
         form.addRow("Maximum retries:", self.retries)
         form.addRow("", self.clip)
         form.addRow("Subtitle languages:", self.sublangs)
@@ -1376,6 +1386,7 @@ class MainWindow(QMainWindow):
         self.tray.show()
         mgr.changed.connect(self._notify_done)
         self._notified: set[str] = set()
+        self.tray.messageClicked.connect(self._open_last_done)
         self.clip = ClipboardWatcher(self)
         self.clip.urls_found.connect(self._on_clipboard_urls)
         self.apply_clipboard_setting()
@@ -1836,6 +1847,7 @@ class MainWindow(QMainWindow):
             s.setValue("sort_by_category", d.sort.isChecked())
             s.setValue("sub_langs", d.sublangs.text().strip())
             s.setValue("auto_retry", d.retry.isChecked())
+            s.setValue("done_action", d.done.currentData())
             s.setValue("max_retries", d.retries.value())
             s.setValue("clipboard_watch", d.clip.isChecked())
             s.setValue("font_size", int(d.fontsize.currentData()))
@@ -1911,7 +1923,19 @@ class MainWindow(QMainWindow):
         it = self.mgr.items.get(iid)
         if it and it.status == COMPLETED and iid not in self._notified:
             self._notified.add(iid)
-            self.tray.showMessage("Download complete", it.filename, QSystemTrayIcon.Information, 4000)
+            self._last_done = (it, time.monotonic())
+            self.tray.showMessage("Download complete", f"{it.filename}\nClick to show the folder.",
+                                  QSystemTrayIcon.Information, 6000)
+            action = str(QSettings().value("done_action", DONE_NOTHING))
+            if action == DONE_OPEN_FILE:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(str(it.path)))
+            elif action == DONE_OPEN_FOLDER:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(it.directory))
+
+    def _open_last_done(self) -> None:
+        it, at = getattr(self, "_last_done", (None, 0.0))
+        if it and it.directory and time.monotonic() - at < 8:        # other tray messages (updates, VPN) also click through here
+            QDesktopServices.openUrl(QUrl.fromLocalFile(it.directory))
 
 
 def apply_settings(mgr: DownloadManager) -> None:

@@ -141,8 +141,7 @@ Layout: `warpdown/` (engine, HLS, subtitles, yt-dlp, manager, Qt GUI), `extensio
 `native/` (native-messaging host + installer), `tests/`.
 
 ## Roadmap
-**Windows support** (installer + native-messaging registration), DASH (`.mpd`) streams, scheduler, site logins, per-site rules, checksum verification, batch / URL-pattern downloads,
-signed Firefox add-on, `.deb` / Flatpak packaging.
+DASH (`.mpd`) streams, site logins, per-site rules, a Chrome Web Store listing.
 
 ## Responsible use
 Warpdown is a tool; you are responsible for what you download. Respect copyright and the terms of the sites you use.
