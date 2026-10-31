@@ -1,3 +1,4 @@
+import os
 import time
 
 import pytest
@@ -266,7 +267,7 @@ def test_download_complete_action(env, monkeypatch, action, expect_file, expect_
     w, m, tmp = env
     QSettings().setValue("done_action", action)
     opened = []
-    monkeypatch.setattr(gui.QDesktopServices, "openUrl", lambda url: opened.append(url.toLocalFile()))
+    monkeypatch.setattr(gui.QDesktopServices, "openUrl", lambda url: opened.append(os.path.normpath(url.toLocalFile())))
     monkeypatch.setattr(w.tray, "showMessage", lambda *a, **k: None)
     it = m.add("http://127.0.0.1:1/a.bin", directory=str(tmp / "dl"))
     it.filename = "a.bin"
