@@ -3,7 +3,7 @@
 Read this first when starting a new session. Update it at the end of each piece of work.
 
 ## Current release
-**0.9.0** (25 Oct 2026) is the last published release; 0.9.1 is being released.
+**0.9.0** (25 Oct 2026) is the last published release; 0.9.2 is being released (the unpublished 0.9.1 draft was replaced by it).
 
 ## Done
 - Download engine, HLS, subtitles, yt-dlp support, checksum verification, signed Firefox add-on (0.8.0).
@@ -15,7 +15,7 @@ Read this first when starting a new session. Update it at the end of each piece 
   - The update notice links the file that fits the install (#3).
   - Release notes are drafted from the commits since the previous tag (#2).
   - Chrome-family browsers: fixed extension ID, automatic connector, release zip (#4).
-- Unreleased (on `main`, after 0.9.1):
+- 0.9.2 (version bumped; tag v0.9.2 builds the release; includes everything since 0.9.0):
   - Torrent and magnet support removed on purpose (the user prefers qBittorrent): no `torrent.py`, no aria2 in any package,
     no magnet/`.torrent` registrations. Do not add it back. Unfinished torrent entries from older versions are dropped on load.
   - *When a download completes* setting (notification, click shows the folder, optional open file / folder).
