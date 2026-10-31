@@ -93,7 +93,6 @@ Comment=IDM-style download manager
 Exec=env PYTHONPATH=$ROOT $PY -m warpdown %u
 Icon=warpdown
 Categories=Network;FileTransfer;
-MimeType=x-scheme-handler/magnet;application/x-bittorrent;
 Terminal=false
 DESK
 echo "Installed. Host registered for Firefox and the Chrome-family browsers found (start a browser once, then rerun if it was missing)."

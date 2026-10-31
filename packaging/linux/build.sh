@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Builds the Linux program into build/linux/warpdown (run from anywhere; needs Python, requirements and pyinstaller).
 #   packaging/linux/build.sh              program + connector + yt-dlp
-#   packaging/linux/build.sh --helpers    also ffmpeg and aria2c (for the Flatpak, which cannot use the system's)
+#   packaging/linux/build.sh --helpers    also ffmpeg (for the Flatpak, which cannot use the system's)
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
@@ -28,11 +28,7 @@ if [ "${1:-}" = "--helpers" ]; then
     https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-linux64-lgpl.tar.xz
   tar -xJf "$ROOT/build/tools/ffmpeg.tar.xz" -C "$ROOT/build/tools"
   cp "$(find "$ROOT/build/tools" -type f -name ffmpeg -path '*bin*' | head -1)" "$OUT/warpdown/ffmpeg"
-  curl -fsSL -o "$ROOT/build/tools/aria2.zip" \
-    https://github.com/abcfy2/aria2-static-build/releases/download/continuous/aria2-x86_64-linux-musl_static.zip
-  (cd "$ROOT/build/tools" && python3 -c "import zipfile; zipfile.ZipFile('aria2.zip').extractall('aria2')")
-  cp "$(find "$ROOT/build/tools/aria2" -type f -name aria2c | head -1)" "$OUT/warpdown/aria2c"
-  chmod +x "$OUT/warpdown/ffmpeg" "$OUT/warpdown/aria2c"
+  chmod +x "$OUT/warpdown/ffmpeg"
 fi
 cp "$ROOT/LICENSE" "$OUT/warpdown/LICENSE"
 echo "Built $(du -sh "$OUT/warpdown" | cut -f1) in $OUT/warpdown"

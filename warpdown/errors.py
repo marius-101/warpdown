@@ -15,9 +15,6 @@ class Explanation:
 
 # (pattern, short text, hint). The first match wins, so specific rules come before general ones.
 _RULES: list[tuple[re.Pattern, str, str]] = [
-    (re.compile(r"Torrents need aria2", re.I),
-     "Torrents need the free aria2 program",
-     "Install it once: sudo apt install aria2 (Windows: put aria2c.exe next to Warpdown), then resume."),
     (re.compile(r"DRM|unsupported encryption|Widevine|PlayReady|FairPlay", re.I),
      "This video is copy-protected (DRM)",
      "Warpdown cannot download DRM-protected video."),

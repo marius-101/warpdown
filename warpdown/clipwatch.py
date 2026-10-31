@@ -9,7 +9,7 @@ from . import ytdlp
 from .util import CATEGORIES
 
 _URL = re.compile(r"https?://[^\s<>\"'`]+", re.I)
-EXTRA_EXTS = {".torrent", ".apk", ".dmg", ".pkg", ".ipa", ".bin", ".img", ".jar", ".whl", ".xpi", ".crx", ".vsix"}
+EXTRA_EXTS = {".apk", ".dmg", ".pkg", ".ipa", ".bin", ".img", ".jar", ".whl", ".xpi", ".crx", ".vsix"}
 DOWNLOAD_EXTS = set().union(*CATEGORIES.values()) | EXTRA_EXTS
 
 
@@ -37,9 +37,5 @@ def is_downloadable(url: str) -> bool:
     return bool(ytdlp.looks_like_video_site(url) and (parts.path.strip("/") or parts.query))
 
 
-_MAGNET = re.compile(r"magnet:\?[^\s<>\"'`]+", re.I)
-
-
 def pick(text: str) -> list[str]:
-    magnets = list(dict.fromkeys(m for m in _MAGNET.findall(text or "") if "xt=urn:btih:" in m.lower()))
-    return magnets + [u for u in extract_urls(text) if is_downloadable(u)]
+    return [u for u in extract_urls(text) if is_downloadable(u)]

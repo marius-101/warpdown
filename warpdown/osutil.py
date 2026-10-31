@@ -17,7 +17,7 @@ CREATE_BREAKAWAY_FROM_JOB = 0x01000000
 
 
 def app_dir() -> Path:
-    """Where the installed program lives (next to it: yt-dlp, ffmpeg, aria2c and the browser host)."""
+    """Where the installed program lives (next to it: yt-dlp, ffmpeg and the browser host)."""
     return Path(sys.executable).resolve().parent if FROZEN else Path(__file__).resolve().parent.parent
 
 

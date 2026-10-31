@@ -16,7 +16,7 @@ run.mkdir(mode=0o700)
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen", XDG_DATA_HOME=tmp + "/data", XDG_CONFIG_HOME=tmp + "/conf",
            XDG_RUNTIME_DIR=str(run), HOME=tmp)
 
-for exe, arg in (("yt-dlp", "--version"), ("aria2c", "--version"), ("ffmpeg", "-version")):
+for exe, arg in (("yt-dlp", "--version"), ("ffmpeg", "-version")):
     p = root / exe
     if p.exists():
         r = subprocess.run([str(p), arg], capture_output=True, text=True, timeout=60)

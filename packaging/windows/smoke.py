@@ -11,7 +11,7 @@ root = Path(sys.argv[1])
 env = dict(os.environ, QT_QPA_PLATFORM="offscreen", WARPDOWN_QUIT_AFTER_MS="4000",
            LOCALAPPDATA=tempfile.mkdtemp(), APPDATA=tempfile.mkdtemp())
 
-for exe, arg in (("yt-dlp.exe", "--version"), ("aria2c.exe", "--version"), ("ffmpeg.exe", "-version")):
+for exe, arg in (("yt-dlp.exe", "--version"), ("ffmpeg.exe", "-version")):
     r = subprocess.run([str(root / exe), arg], capture_output=True, text=True, timeout=60)
     assert r.returncode == 0, (exe, r.stderr)
     print(exe, "ok:", r.stdout.splitlines()[0][:70])

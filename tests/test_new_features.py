@@ -1,17 +1,15 @@
-"""Speed limits, checksums, queue order/priority, search, statistics, VPN pause and torrents (against a fake aria2)."""
+"""Speed limits, checksums, queue order/priority, search, statistics, VPN pause, drag and drop and update notices."""
 import json
-import threading
 import time
 from datetime import date, datetime as D
-from http.server import BaseHTTPRequestHandler, HTTPServer
 from pathlib import Path
 
 import pytest
 
-from warpdown import checksum, clipwatch, manager as mg, torrent, vpn
+from warpdown import checksum, clipwatch, manager as mg, vpn
 from warpdown.engine import Job, RateLimiter
 from warpdown.limits import ChainedLimiter, LimitSchedule
-from warpdown.manager import COMPLETED, DOWNLOADING, ERROR, PAUSED, QUEUED, DownloadManager
+from warpdown.manager import COMPLETED, DOWNLOADING, PAUSED, QUEUED, DownloadManager
 from warpdown.stats import Stats
 
 
@@ -245,88 +243,24 @@ def test_finished_downloads_are_counted(m):
     assert it.status == COMPLETED
     assert m.stats.total()[1] == 1 and m.stats.cats["Compressed"]["bytes"] == 4096
 
-
-# ---------------------------------------------------------------- torrents
+# ---------------------------------------------------------------- torrents are not supported
 MAGNET = "magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567&dn=Test%20Distro"
 
 
-def test_torrent_sources_are_recognised(m):
-    assert torrent.is_torrent_source(MAGNET) and torrent.is_torrent_source("https://x/y/a.torrent?z=1")
-    assert torrent.is_torrent_source("/home/u/a.torrent") and not torrent.is_torrent_source("https://x/a.zip")
-    assert torrent.magnet_name(MAGNET) == "Test Distro"
-    assert m.add(MAGNET, "/tmp/wd", start=False).kind == "torrent"
-    assert clipwatch.pick(f"look: {MAGNET} and https://x/f.zip") == [MAGNET, "https://x/f.zip"]
+def test_clipboard_ignores_magnet_links():
+    assert clipwatch.pick(f"look: {MAGNET} and https://x/f.zip") == ["https://x/f.zip"]
 
 
-def test_torrent_without_aria2_explains_what_to_install(m, monkeypatch, tmp_path):
-    monkeypatch.setattr(torrent, "available", lambda: False)
-    it = m.add(MAGNET, str(tmp_path), start=False)
-    it.status = QUEUED
-    DownloadManager._begin(m, it)
-    assert it.status == ERROR and "aria2" in it.error
-    from warpdown.errors import explain
-    assert "aria2" in explain(it.error).short
-
-
-class FakeAria2(BaseHTTPRequestHandler):
-    calls: list = []
-    polls = {"g1": 0, "g2": 0}
-
-    def log_message(self, *a):
-        pass
-
-    def do_POST(self):
-        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        assert req["params"][0] == "token:secret"
-        method, params = req["method"], req["params"][1:]
-        FakeAria2.calls.append(method)
-        result = "OK"
-        if method == "aria2.getVersion":
-            result = {"version": "1.37"}
-        elif method == "aria2.addUri":
-            result = "g1"
-        elif method == "aria2.tellStatus":
-            gid = params[0]
-            FakeAria2.polls[gid] += 1
-            n = FakeAria2.polls[gid]
-            if gid == "g1":
-                result = {"status": "complete", "followedBy": ["g2"]}          # the magnet's metadata finished
-            else:
-                done = n >= 2
-                result = {"status": "complete" if done else "active", "totalLength": "1000",
-                          "completedLength": "1000" if done else "400", "downloadSpeed": "0" if done else "100",
-                          "connections": "5", "bittorrent": {"info": {"name": "Test Distro"}}}
-        body = json.dumps({"jsonrpc": "2.0", "id": "w", "result": result}).encode()
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-class FakeDownloader(torrent.Aria2Downloader):
-    def _spawn(self):
-        self.srv = HTTPServer(("127.0.0.1", 0), FakeAria2)
-        self._port, self._token = self.srv.server_address[1], "secret"
-        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-
-    def _shutdown_aria2(self):
-        super()._shutdown_aria2()
-        self.srv.shutdown()
-
-
-def test_torrent_download_follows_a_magnet_to_completion(tmp_path):
-    FakeAria2.calls, FakeAria2.polls = [], {"g1": 0, "g2": 0}
-    finished = threading.Event()
-    lim = RateLimiter(100 * 1024)
-    job = Job(MAGNET, tmp_path / "torrent", -1, False, 1, {}, {})
-    eng = FakeDownloader(job, lim, on_finish=lambda d: finished.set())
-    eng.start()
-    assert finished.wait(15)
-    assert eng.done and not eng.error
-    assert eng.name == "Test Distro" and eng.job.dest == tmp_path / "Test Distro"
-    assert eng.downloaded() == 1000 and eng.estimated_size() == 1000
-    assert "aria2.addUri" in FakeAria2.calls and "aria2.changeGlobalOption" in FakeAria2.calls
-    assert FakeAria2.calls[-1] == "aria2.shutdown"
+def test_unfinished_torrents_from_an_older_version_are_dropped_on_load(m, tmp_path):
+    rows = [dict(url=MAGNET, directory=str(tmp_path), filename="t", kind="torrent", status=PAUSED),
+            dict(url=MAGNET, directory=str(tmp_path), filename="done", kind="torrent", status=COMPLETED),
+            dict(url="http://x/a.zip", directory=str(tmp_path), filename="a.zip", status=PAUSED)]
+    m._file.write_text(json.dumps(rows))
+    mgr = DownloadManager()
+    try:
+        assert sorted(i.filename for i in mgr.items.values()) == ["a.zip", "done"]
+    finally:
+        mgr.shutdown()
 
 
 # ---------------------------------------------------------------- sorting by column, folder menu
@@ -368,80 +302,31 @@ def test_stale_error_is_cleared_when_a_retry_starts(m, monkeypatch, tmp_path):
     assert it.status == DOWNLOADING and it.error == "" and started
 
 
-class Flaky(FakeAria2):
-    failures = 3
-
-    def do_POST(self):
-        req = json.loads(self.rfile.read(int(self.headers["Content-Length"])))
-        if req["method"] == "aria2.tellStatus" and Flaky.failures > 0:
-            Flaky.failures -= 1
-            self.send_response(503)                      # aria2 too busy to answer
-            self.send_header("Content-Length", "0")
-            self.end_headers()
-            return
-        self._respond(req)
-
-    def _respond(self, req):
-        method, params = req["method"], req["params"][1:]
-        result = "OK"
-        if method == "aria2.getVersion":
-            result = {"version": "1.37"}
-        elif method == "aria2.addUri":
-            result = "g1"
-        elif method == "aria2.tellStatus":
-            result = {"status": "complete", "totalLength": "10", "completedLength": "10", "downloadSpeed": "0",
-                      "connections": "1", "bittorrent": {"info": {"name": "Flaky"}}}
-        body = json.dumps({"jsonrpc": "2.0", "id": "w", "result": result}).encode()
-        self.send_response(200)
-        self.send_header("Content-Length", str(len(body)))
-        self.end_headers()
-        self.wfile.write(body)
-
-
-def test_torrent_survives_aria2_not_answering_for_a_moment(tmp_path):
-    Flaky.failures = 3
-    class D(FakeDownloader):
-        def _spawn(self):
-            self.srv = HTTPServer(("127.0.0.1", 0), Flaky)
-            self._port, self._token = self.srv.server_address[1], "secret"
-            threading.Thread(target=self.srv.serve_forever, daemon=True).start()
-    finished = threading.Event()
-    eng = D(Job(MAGNET, tmp_path / "t", -1, False, 1, {}, {}), RateLimiter(0), on_finish=lambda d: finished.set())
-    eng.start()
-    assert finished.wait(30)
-    assert eng.done and not eng.error and Flaky.failures == 0
-
-
-# ---------------------------------------------------------------- drag and drop, torrent files, start at login
-def test_dropping_torrent_files_and_links(m, qapp, tmp_path, monkeypatch):
-    from PySide6.QtCore import QMimeData, QPointF, QSettings, Qt, QUrl
+# ---------------------------------------------------------------- drag and drop, start at login
+def test_dropping_links(m, qapp, monkeypatch):
+    from PySide6.QtCore import QMimeData, QPointF, Qt, QUrl
     from PySide6.QtGui import QDropEvent
     from warpdown import gui
-    QSettings().setValue("download_dir", str(tmp_path / "dl"))
     win = gui.MainWindow(m)
     try:
         assert win.acceptDrops()
-        t = tmp_path / "a.torrent"
-        t.write_bytes(b"d4:infod4:name1:xee")
-        (tmp_path / "doc.txt").write_text("not a torrent")
         added = []
         monkeypatch.setattr(win, "add_dialog", lambda u, *a, **k: added.append(("one", u)))
         monkeypatch.setattr(win, "batch_dialog", lambda text="": added.append(("many", text)))
 
         md = QMimeData()
-        md.setUrls([QUrl.fromLocalFile(str(t)), QUrl.fromLocalFile(str(tmp_path / "doc.txt"))])
+        md.setUrls([QUrl.fromLocalFile("/tmp/doc.txt")])                   # a local file is ignored
         ev = QDropEvent(QPointF(5, 5), Qt.CopyAction, md, Qt.LeftButton, Qt.NoModifier)
         win.dropEvent(ev)
         assert ev.isAccepted()
         pump(qapp, 0.2)
-        kinds = [(i.kind, i.url) for i in m.items.values()]
-        assert kinds == [("torrent", str(t))] and added == []              # the text file is ignored
+        assert added == [] and not m.items
 
-        files, links = win.dropped_items(_mime(text=MAGNET))               # a magnet link dragged as text
-        assert files == [] and links == [MAGNET]
-        win.handle_dropped([], links)
-        win.handle_dropped([], ["http://x/a.zip", "http://x/b.zip"])
-        assert added == [("one", MAGNET), ("many", "http://x/a.zip\nhttp://x/b.zip")]
+        assert win.dropped_links(_mime(text="see http://x/a.zip please")) == ["http://x/a.zip"]   # a link dragged as text
+        assert win.dropped_links(_mime(text=MAGNET)) == []                 # magnet links are not downloaded
+        win.handle_dropped(["http://x/a.zip"])
+        win.handle_dropped(["http://x/a.zip", "http://x/b.zip"])
+        assert added == [("one", "http://x/a.zip"), ("many", "http://x/a.zip\nhttp://x/b.zip")]
     finally:
         win.close()
         win.deleteLater()
@@ -457,13 +342,6 @@ def _mime(text="", urls=()):
     return md
 
 
-def test_torrent_file_path_is_a_torrent_source(m, tmp_path):
-    t = tmp_path / "x.torrent"
-    t.write_bytes(b"x")
-    it = m.add(str(t), str(tmp_path), start=False)
-    assert it.kind == "torrent"
-
-
 def test_start_at_login_file_on_linux(tmp_path, monkeypatch):
     import sys
     from warpdown import autostart
@@ -476,19 +354,6 @@ def test_start_at_login_file_on_linux(tmp_path, monkeypatch):
     assert autostart.is_enabled() and "--background" in text and "Exec=" in text
     autostart.set_enabled(False)
     assert not autostart.is_enabled()
-
-
-def test_aria2_output_is_always_drained(tmp_path):
-    """A chatty aria2 must never fill the pipe (it would block mid-download on Windows)."""
-    import subprocess, sys
-    code = "import sys\nfor i in range(200000): print('progress line', i, 'x' * 60)\nprint('done')\n"
-    eng = torrent.Aria2Downloader(Job(MAGNET, tmp_path / "t", -1, False, 1, {}, {}), RateLimiter(0))
-    eng._proc = subprocess.Popen([sys.executable, "-c", code], stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                                 text=True)
-    threading.Thread(target=eng._drain, args=(eng._proc.stdout,), daemon=True).start()
-    assert eng._proc.wait(timeout=60) == 0                      # without the reader this would hang forever
-    time.sleep(0.3)
-    assert list(eng._tail)[-1] == "done" and len(eng._tail) == 20
 
 
 def test_every_column_including_name_can_be_resized(m, qapp):

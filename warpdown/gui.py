@@ -257,7 +257,7 @@ class Model(QAbstractTableModel):
         return None
 
 
-from . import autostart, clipwatch, kdeconnect, osutil, torrent, updates
+from . import autostart, clipwatch, kdeconnect, osutil, updates
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
 
@@ -333,13 +333,7 @@ class AddDialog(QDialog):
         outer = QVBoxLayout(self)
         form = QFormLayout()
         form.setFieldGrowthPolicy(QFormLayout.ExpandingFieldsGrow)
-        pick = QPushButton("Torrent file…")
-        pick.setToolTip("Choose a .torrent file from this computer")
-        pick.clicked.connect(self._choose_torrent)
-        url_row = QHBoxLayout()
-        url_row.addWidget(self.url, 1)
-        url_row.addWidget(pick)
-        form.addRow("URL:", url_row)
+        form.addRow("URL:", self.url)
         form.addRow("", self.info)
         form.addRow("Save as:", self.name)
         form.addRow("Save to:", row)
@@ -373,14 +367,6 @@ class AddDialog(QDialog):
         if use_ytdlp and ytdlp.available():
             self._set_ytdlp(True)
         if url:
-            self._probe()
-
-    def _choose_torrent(self) -> None:
-        path, _ = QFileDialog.getOpenFileName(self, "Choose a torrent file", str(Path.home()),
-                                              "Torrent files (*.torrent);;All files (*)")
-        if path:
-            self.url.setText(path)
-            self._set_ytdlp(False)
             self._probe()
 
     # ---- yt-dlp mode ----
@@ -519,9 +505,6 @@ class AddDialog(QDialog):
 
     def _probe(self):
         u = self.url.text().strip()
-        if torrent.is_torrent_source(u):
-            self.info.setText(torrent.magnet_name(u) or ("Torrent" if torrent.available() else torrent.INSTALL_HINT))
-            return
         if not u.startswith(("http://", "https://")):
             return
         if not self._yt_user_set and ytdlp.available() and ytdlp.looks_like_video_site(u):
@@ -1637,7 +1620,7 @@ class MainWindow(QMainWindow):
         tb.addAction(a)
         return a
 
-    # ---- drag and drop: .torrent files, magnet links and web addresses dropped on the window ----
+    # ---- drag and drop: web addresses dropped on the window ----
     def dragEnterEvent(self, e):
         md = e.mimeData()
         if md.hasUrls() or md.hasText():
@@ -1646,31 +1629,19 @@ class MainWindow(QMainWindow):
     dragMoveEvent = dragEnterEvent
 
     def dropEvent(self, e):
-        files, links = self.dropped_items(e.mimeData())
+        links = self.dropped_links(e.mimeData())
         e.acceptProposedAction()
-        QTimer.singleShot(0, lambda: self.handle_dropped(files, links))      # not from inside the drop event
+        QTimer.singleShot(0, lambda: self.handle_dropped(links))      # not from inside the drop event
 
     @staticmethod
-    def dropped_items(md) -> tuple[list[str], list[str]]:
-        files, links = [], []
-        for u in md.urls():
-            if u.isLocalFile():
-                p = os.path.normpath(u.toLocalFile())          # native separators (backslashes on Windows)
-                if p.lower().endswith(".torrent"):
-                    files.append(p)
-            elif u.scheme() in ("http", "https", "ftp", "magnet"):
-                links.append(u.toString())
-        if not files and not links and md.hasText():
+    def dropped_links(md) -> list[str]:
+        links = [u.toString() for u in md.urls() if u.scheme() in ("http", "https", "ftp")]
+        if not links and md.hasText():
             links = clipwatch.pick(md.text()) or [l.strip() for l in md.text().splitlines()
-                                                  if l.strip().startswith(("http://", "https://", "magnet:"))]
-        return files, list(dict.fromkeys(links))
+                                                  if l.strip().startswith(("http://", "https://"))]
+        return list(dict.fromkeys(links))
 
-    def handle_dropped(self, files: list[str], links: list[str]) -> None:
-        if files:
-            folder = str(QSettings().value("download_dir", str(default_download_dir())))
-            for f in files:
-                self.mgr.add(f, folder, kind="torrent")
-            self.status.showMessage(f"Added {len(files)} torrent file{'s' if len(files) != 1 else ''}", 6000)
+    def handle_dropped(self, links: list[str]) -> None:
         if len(links) == 1:
             self.add_dialog(links[0])
         elif links:
@@ -1804,7 +1775,7 @@ class MainWindow(QMainWindow):
                    mode: str = ""):
         if not url:
             clip = QGuiApplication.clipboard().text().strip()
-            url = clip if clip.startswith(("http://", "https://", "magnet:")) and "\n" not in clip else ""
+            url = clip if clip.startswith(("http://", "https://")) and "\n" not in clip else ""
         d = AddDialog(self, url, headers or {}, use_ytdlp=(mode == "ytdlp"))
         try:
             d.set_subs(subs or [], headers or {})

@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import os
-import shutil
 import threading
 from datetime import datetime
 from urllib.parse import urlsplit
@@ -17,7 +16,6 @@ from PySide6.QtCore import QObject, QTimer, Signal
 
 from . import checksum as checksummod
 from . import retry as retrymod
-from . import torrent as torrentmod
 from .engine import Downloader, Job, RateLimiter, is_hls, probe
 from .limits import ChainedLimiter, LimitSchedule
 from .stats import Stats
@@ -172,6 +170,8 @@ class DownloadManager(QObject):
         try:
             for d in json.loads(self._file.read_text()):
                 it = Item(**d)
+                if it.kind == "torrent" and it.status != COMPLETED:    # torrents are no longer supported
+                    continue
                 if it.category == "General":   # renamed in 0.2
                     it.category = "Other"
                 if it.status in (DOWNLOADING, PROBING, QUEUED, RETRYING):
@@ -207,9 +207,6 @@ class DownloadManager(QObject):
         return it
 
     def _new_item(self, url, directory, filename, headers, connections, start, sort, subs, auto_subs, kind, opts) -> Item:
-        if kind == "http" and torrentmod.is_torrent_source(url):
-            kind = "torrent"
-            filename = filename or torrentmod.magnet_name(url)
         return Item(url=url, directory=directory, filename=filename, headers=dict(headers or {}),
                     connections=connections or self.default_connections,
                     sort=self.sort_by_category if sort is None else sort, subs=list(subs or []),
@@ -259,11 +256,7 @@ class DownloadManager(QObject):
             for p in (part, Path(str(part) + ".warpdown"), Path(str(part) + ".kudm")):
                 p.unlink(missing_ok=True)
             if delete_files:
-                if it.kind == "torrent" and it.path.is_dir():
-                    shutil.rmtree(it.path, ignore_errors=True)
-                else:
-                    it.path.unlink(missing_ok=True)
-            Path(str(it.path) + ".aria2").unlink(missing_ok=True)      # torrent resume file
+                it.path.unlink(missing_ok=True)
         self.removed.emit(iid)
         self.save()
         self._schedule()
@@ -415,27 +408,6 @@ class DownloadManager(QObject):
                 it.prepared = True
             self._launch(it)
             return
-        if it.kind == "torrent":
-            if not torrentmod.available():
-                it.status, it.error = ERROR, torrentmod.INSTALL_HINT
-                self.changed.emit(it.id)
-                self._schedule()
-                return
-            if not it.prepared:
-                if it.sort:
-                    it.directory = str(Path(it.directory) / "Torrents")
-                    it.sort = False
-                try:
-                    Path(it.directory).mkdir(parents=True, exist_ok=True)
-                except OSError as e:
-                    it.status, it.error = ERROR, str(e)
-                    self.changed.emit(it.id)
-                    self._schedule()
-                    return
-                it.filename = it.filename or torrentmod.magnet_name(it.url) or "torrent"
-                it.prepared = True
-            self._launch(it)
-            return
         if it.filename and (it.size > 0 or it.kind == "hls") and it.url:
             self._launch(it)
             return
@@ -495,7 +467,7 @@ class DownloadManager(QObject):
 
     def _launch(self, it: Item) -> None:
         job = Job(it.url, it.path, it.size, it.resumable, it.connections, self._browser_headers(it), it.opts)
-        cls = {"hls": HlsDownloader, "ytdlp": YtdlpDownloader, "torrent": torrentmod.Aria2Downloader}.get(it.kind, Downloader)
+        cls = {"hls": HlsDownloader, "ytdlp": YtdlpDownloader}.get(it.kind, Downloader)
         own = self._own_limiters.setdefault(it.id, RateLimiter(0))
         own.rate = it.limit_kb * 1024
         eng = cls(job, ChainedLimiter(self.limiter, own), on_finish=lambda d, i=it.id, q=self._inbox.queue: q.put(("finished", (i, d))))
@@ -518,7 +490,7 @@ class DownloadManager(QObject):
             return
         it.speed = 0.0
         if eng.done:
-            if it.kind in ("hls", "ytdlp", "torrent"):
+            if it.kind in ("hls", "ytdlp"):
                 it.filename, it.size = eng.job.dest.name, eng.downloaded()
                 it.category = category_for(it.filename)
             it.status, it.downloaded = COMPLETED, max(it.size, it.downloaded)
@@ -656,8 +628,6 @@ class DownloadManager(QObject):
             it = self.items.get(iid)
             if it and it.status == DOWNLOADING:
                 it.downloaded, it.speed = eng.snapshot()
-                if it.kind in ("hls", "ytdlp", "torrent"):
+                if it.kind in ("hls", "ytdlp"):
                     it.size = eng.estimated_size()
-                if it.kind == "torrent" and getattr(eng, "name", ""):
-                    it.filename = eng.name
                 self.changed.emit(iid)

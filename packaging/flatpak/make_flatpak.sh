@@ -9,7 +9,7 @@ BRANCH="${FLATPAK_BRANCH:-6.10}"
 VERSION="$(python3 -c "import re,pathlib; print(re.search(r'__version__ = \"(.+?)\"', pathlib.Path('warpdown/__init__.py').read_text()).group(1))")"
 SRC="$ROOT/build/linux/warpdown"
 APP="$ROOT/build/flatpak/app"
-[ -x "$SRC/warpdown" ] && [ -x "$SRC/ffmpeg" ] && [ -x "$SRC/aria2c" ] || { echo "Run packaging/linux/build.sh --helpers first"; exit 1; }
+[ -x "$SRC/warpdown" ] && [ -x "$SRC/ffmpeg" ] || { echo "Run packaging/linux/build.sh --helpers first"; exit 1; }
 rm -rf "$ROOT/build/flatpak" && mkdir -p "$ROOT/dist"
 flatpak build-init "$APP" "$APPID" "${FLATPAK_SDK:-$RUNTIME}" "$RUNTIME" "$BRANCH"
 F="$APP/files"

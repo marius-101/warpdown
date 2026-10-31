@@ -6,7 +6,7 @@ Read this first when starting a new session. Update it at the end of each piece 
 **0.9.0** (25 Oct 2026): first release with the Linux `.deb` and Flatpak, built by `linux.yml` and `windows.yml`.
 
 ## Done
-- Download engine, HLS, subtitles, yt-dlp and aria2 (torrents) support, checksum verification, signed Firefox add-on (0.8.0).
+- Download engine, HLS, subtitles, yt-dlp support, checksum verification, signed Firefox add-on (0.8.0).
 - Windows installer and portable zip, native-messaging registration, Windows 11 theme (0.8.x).
 - Daily update check with a status-bar notice, "Check now" and an off switch (0.8.6).
 - Linux `.deb` and Flatpak, Linux CI with smoke tests (0.9.0).

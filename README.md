@@ -27,11 +27,7 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Checksum verification** — paste a SHA-256 / SHA-512 / SHA-1 / MD5 checksum (*right-click → Verify checksum…*) and
   get a ✓ or ✗; Warpdown also looks for a published `NAME.sha256` (etc.) next to a downloaded file and checks it
   automatically (can be turned off in Settings)
-- **Drag and drop** — drop `.torrent` files, magnet links or web addresses on the window; *Add URL* also has a
-  *Torrent file…* button. *Settings → Start Warpdown when I log in* keeps it in the tray so browser hand-offs are instant
-- **Torrents and magnet links** — `magnet:` links, `.torrent` addresses and `.torrent` files, downloaded with
-  [aria2](https://aria2.github.io) (`sudo apt install aria2`; on Windows put `aria2c.exe` next to Warpdown or in your
-  PATH). Warpdown registers as the handler for magnet links and does not seed after finishing
+- **Drag and drop** — drop web addresses on the window. *Settings → Start Warpdown when I log in* keeps it in the tray so browser hand-offs are instant
 - **VPN guard** — *Settings → Pause all downloads while no VPN is connected*: downloads stop as soon as the VPN drops
   and continue when it is back. It looks for a VPN network interface (WireGuard, OpenVPN, ProtonVPN, Mullvad,
   Tailscale, …); it is a convenience, not a firewall kill-switch
@@ -64,7 +60,7 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
 - **Themes** — pick a *Style* (System default, Kubuntu, Windows 11) and a *Mode* (Follow system, Light, Dark) in
   Settings; each style has its own colours, shapes and icon set, with a live preview
 - **Adjustable text size** — *Settings → Text size* (live preview), or `Ctrl +` / `Ctrl -` / `Ctrl 0` in the main window
-- Tray icon, completion notifications, pure Python + Qt (PySide6). aria2 is only needed for torrents
+- Tray icon, completion notifications, pure Python + Qt (PySide6)
 
 ### Themes
 ![Warpdown themes: Kubuntu and Windows 11, light and dark](docs/themes.png)
@@ -76,7 +72,7 @@ takes over downloads and grabs videos, subtitles, and YouTube support through yt
    click **More info → Run anyway**. It installs for your user only (no administrator rights).
 3. Start Warpdown, then press **Browser** in the toolbar to add the Firefox add-on (or Chrome/Edge/Brave).
 
-The Windows program includes yt-dlp, ffmpeg and aria2, so video sites, merging and torrents work out of the box.
+The Windows program includes yt-dlp and ffmpeg, so video sites and merging work out of the box.
 It is built and smoke-tested automatically on a Windows machine (GitHub Actions) for every change.
 
 ## Install on Linux
@@ -84,9 +80,9 @@ Download from the [latest release](https://github.com/marius-101/warpdown/releas
 
 - **`warpdown_<version>_amd64.deb`** (Kubuntu, Ubuntu, Debian, Mint …):
   `sudo apt install ./warpdown_<version>_amd64.deb` — installs the program, the menu entry and the Firefox connector.
-  `ffmpeg` and `aria2` are installed with it (recommended packages).
+  `ffmpeg` is installed with it (recommended package).
 - **`warpdown-<version>.flatpak`** (any distribution with Flatpak):
-  `flatpak install --user warpdown-<version>.flatpak`. It includes ffmpeg and aria2. It can read your Downloads, Videos,
+  `flatpak install --user warpdown-<version>.flatpak`. It includes ffmpeg. It can read your Downloads, Videos,
   Music, Documents and Pictures folders; Firefox gets its connector from *Browser → Install / repair connector*.
   Chrome-based browsers and the option *Start when I log in* are not available in the Flatpak yet.
 

@@ -25,7 +25,7 @@ jobs:
       - run: python -m pytest -q
         env:
           QT_QPA_PLATFORM: offscreen
-      - name: Build the program (with ffmpeg and aria2 for the Flatpak)
+      - name: Build the program (with ffmpeg for the Flatpak)
         run: bash packaging/linux/build.sh --helpers
       - name: Smoke test the built program
         run: python packaging/linux/smoke.py build/linux/warpdown

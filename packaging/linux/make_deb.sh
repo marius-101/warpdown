@@ -30,13 +30,13 @@ Priority: optional
 Architecture: amd64
 Installed-Size: ${SIZE}
 Depends: libc6 (>= 2.35), libegl1, libgl1, libfontconfig1, libdbus-1-3, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0, libxcb-icccm4, libxcb-image0, libxcb-keysyms1, libxcb-randr0, libxcb-render-util0, libxcb-shape0, libxcb-xinerama0, libxcb-xkb1
-Recommends: ffmpeg, aria2
+Recommends: ffmpeg
 Suggests: nodejs
 Homepage: https://github.com/marius-101/warpdown
 Maintainer: Warpdown project <noreply@github.com>
 Description: fast download manager with browser integration
  Segmented, resumable downloads (like IDM), a Firefox/Chrome extension, video sites
- through yt-dlp, HLS streams, torrents and magnet links (aria2), scheduler,
+ through yt-dlp, HLS streams, scheduler,
  speed limits, checksum verification and a clipboard watcher.
 CTL
 cat > "$PKG/DEBIAN/postinst" <<'POST'

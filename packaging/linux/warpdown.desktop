@@ -2,11 +2,10 @@
 Type=Application
 Name=Warpdown
 GenericName=Download Manager
-Comment=Fast download manager with browser integration, video sites, torrents and a scheduler
+Comment=Fast download manager with browser integration, video sites and a scheduler
 Exec=@EXEC@ %U
 Icon=@ICON@
 Terminal=false
 Categories=Network;FileTransfer;
-Keywords=download;manager;torrent;magnet;video;youtube;IDM;
-MimeType=x-scheme-handler/magnet;application/x-bittorrent;
+Keywords=download;manager;video;youtube;IDM;
 StartupWMClass=warpdown

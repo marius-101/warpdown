@@ -20,12 +20,9 @@ python -m PyInstaller --noconfirm --onefile --console --name warpdown-host --ico
   native\warpdown_host.py
 if ($LASTEXITCODE -ne 0 -or -not (Test-Path "$out\warpdown\warpdown-host.exe")) { throw "PyInstaller failed for warpdown-host.exe" }
 
-# helper programs: yt-dlp (video sites), aria2 (torrents), ffmpeg (joining video and audio)
+# helper programs: yt-dlp (video sites), ffmpeg (joining video and audio)
 $tools = "$root\build\tools"
 Invoke-WebRequest "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe" -OutFile "$out\warpdown\yt-dlp.exe"
-Invoke-WebRequest "https://github.com/aria2/aria2/releases/download/release-1.37.0/aria2-1.37.0-win-64bit-build1.zip" -OutFile "$tools\aria2.zip"
-Expand-Archive "$tools\aria2.zip" "$tools\aria2" -Force
-Copy-Item (Get-ChildItem "$tools\aria2" -Recurse -Filter aria2c.exe | Select-Object -First 1).FullName "$out\warpdown\aria2c.exe"
 Invoke-WebRequest "https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-master-latest-win64-lgpl.zip" -OutFile "$tools\ffmpeg.zip"
 Expand-Archive "$tools\ffmpeg.zip" "$tools\ffmpeg" -Force
 Copy-Item (Get-ChildItem "$tools\ffmpeg" -Recurse -Filter ffmpeg.exe | Select-Object -First 1).FullName "$out\warpdown\ffmpeg.exe"

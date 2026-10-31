@@ -12,7 +12,6 @@
     <ul>
       <li>Fast, resumable downloads with category folders</li>
       <li>Video sites through yt-dlp, HLS streams and subtitles</li>
-      <li>Torrents and magnet links</li>
       <li>Scheduler, speed limits, automatic retry and checksum verification</li>
       <li>Light and dark themes</li>
     </ul>
