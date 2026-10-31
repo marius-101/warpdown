@@ -19,6 +19,7 @@ Read this first when starting a new session. Update it at the end of each piece 
   - Torrent and magnet support removed on purpose (the user prefers qBittorrent): no `torrent.py`, no aria2 in any package,
     no magnet/`.torrent` registrations. Do not add it back. Unfinished torrent entries from older versions are dropped on load.
   - *When a download completes* setting (notification, click shows the folder, optional open file / folder).
+  - The last table column (Added) stretches, so narrowing another column leaves no empty header area (its right edge cannot be dragged).
 
 ## Next
 - Try the `.deb` and Flatpak on a real install (not yet tested by the user).
