@@ -369,9 +369,12 @@ def test_every_column_including_name_can_be_resized(m, qapp):
         before = h.sectionSize(0)
         h.resizeSection(0, before + 120)                    # what dragging the Name divider does
         assert h.sectionSize(0) == before + 120
-        win.resize(1400, 500)                               # a wider window: free space goes to Name, nothing is lost
+        h.resizeSection(5, h.sectionSize(5) - 60)           # a narrower Status column: Added grows, no empty header area
         pump(qapp, 0.3)
-        assert h.length() >= win.table.viewport().width() - 1
+        assert h.length() == win.table.viewport().width()
+        win.resize(1400, 500)                               # a wider window: the last column takes the free space
+        pump(qapp, 0.3)
+        assert h.length() == win.table.viewport().width()
         win.resize(900, 500)                                # a narrower window: Name gives way, no scrollbar needed
         pump(qapp, 0.3)
         assert h.length() <= win.table.viewport().width() + 1 or h.sectionSize(0) == 120

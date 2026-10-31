@@ -1289,7 +1289,7 @@ class MainWindow(QMainWindow):
         self.table.verticalHeader().hide()
         h = self.table.horizontalHeader()
         h.setSectionResizeMode(QHeaderView.Interactive)
-        h.setStretchLastSection(False)
+        h.setStretchLastSection(True)                          # the last column (Added) takes what the others leave free
         h.setMinimumSectionSize(60)
         self.table.viewport().installEventFilter(self)         # window resized: the Name column takes the free space
         self._base_widths = [300, 75, 140, 85, 65, 250, 125]
@@ -1575,10 +1575,10 @@ class MainWindow(QMainWindow):
         return super().eventFilter(obj, ev)
 
     def _fill_name(self) -> None:
-        """All columns can be dragged. When the window is resized, the Name column absorbs the difference."""
+        """All columns can be dragged. When the window gets too narrow, the Name column gives way (the last one stretches)."""
         h = self.table.horizontalHeader()
         gap = self.table.viewport().width() - h.length()
-        if gap:                                    # free space goes to Name; too little space is taken from it (down to 120 px)
+        if gap < 0:                                # too little space is taken from Name (down to 120 px)
             h.resizeSection(0, max(120, h.sectionSize(0) + gap))
 
     def rescale(self) -> None:
