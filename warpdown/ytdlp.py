@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -16,7 +17,8 @@ import time
 from collections import deque
 from glob import escape as glob_escape
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urljoin, urlsplit
+from urllib.request import Request, urlopen
 
 from . import osutil
 from .engine import RateLimiter
@@ -126,6 +128,43 @@ def update() -> tuple[bool, str]:
     return r.returncode == 0, out[-1] if out else ""
 
 
+_PACKED = re.compile(r"\}\('(.*)',(\d+),(\d+),'(.*?)'\.split\('\|'\)", re.S)
+_STREAM_URL = re.compile(r"""["']((?:https?:)?//[^"'\s\\]+?\.(?:m3u8|mp4)(?:\?[^"'\s\\]*)?|/[^"'\s\\]+?\.m3u8(?:\?[^"'\s\\]*)?)["']""")
+
+
+_EMBED_UA = "Mozilla/5.0"      # stream addresses are often tied to the User-Agent that loaded the page
+
+
+def _unpack(text: str) -> str:
+    """Undo Dean Edwards' p.a.c.k.e.r (the packed script many embed players hide their stream address in)."""
+    m = _PACKED.search(text)
+    if not m:
+        return ""
+    payload, base, count, words = m.group(1).replace("\\'", "'"), int(m.group(2)), int(m.group(3)), m.group(4).split("|")
+
+    def word(n: int) -> str:
+        return (word(n // base) if n >= base else "") + "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ"[n % base]
+
+    table = {word(i): (words[i] if i < len(words) and words[i] else word(i)) for i in range(count)}
+    return re.sub(r"\b\w+\b", lambda x: table.get(x.group(0), x.group(0)), payload)
+
+
+def find_embedded_stream(url: str, headers: dict | None = None, timeout: float = 20) -> str | None:
+    """For embed pages yt-dlp has no extractor for: look for a stream address in the page (also inside packed
+    scripts). Returns the first HLS playlist (or else an .mp4), or None."""
+    h = {"User-Agent": (headers or {}).get("User-Agent") or _EMBED_UA}
+    if (headers or {}).get("Referer"):
+        h["Referer"] = headers["Referer"]
+    try:
+        with urlopen(Request(url, headers=h), timeout=timeout) as r:
+            page = r.read(3_000_000).decode("utf-8", "replace")
+    except (OSError, ValueError):
+        return None
+    found = [urljoin(url, m.replace("\\/", "/")) for m in _STREAM_URL.findall(page + "\n" + _unpack(page))]
+    found = [u for u in found if not u.endswith(".js")]
+    return next((u for u in found if ".m3u8" in u), found[0] if found else None)
+
+
 def _common_args(headers: dict, url: str = "") -> list[str]:
     args = ["--no-playlist", "--no-warnings", "--ignore-config"]
     rt = js_runtime()
@@ -228,10 +267,13 @@ class YtdlpDownloader:
         return done, max((done - b0) / (now - t0), 0.0) if now > t0 else self._speed
 
     # ---- internals ----
-    def _args(self) -> list[str]:
+    def _args(self, url: str | None = None, referer: str | None = None) -> list[str]:
         job, o = self.job, self.job.opts
+        url = url or job.url
+        headers = ({**job.headers, "Referer": referer, "User-Agent": job.headers.get("User-Agent") or _EMBED_UA}
+                   if referer else job.headers)
         stem = job.dest.with_suffix("")
-        args = [*CMD, *_common_args(job.headers, job.url), "--newline", "--progress", "--no-simulate", "--continue",
+        args = [*CMD, *_common_args(headers, url), "--newline", "--progress", "--no-simulate", "--continue",
                 "--progress-template",
                 "download:WDPROG|%(progress.downloaded_bytes)s|%(progress.total_bytes)s|"
                 "%(progress.total_bytes_estimate)s|%(progress.speed)s|%(progress.filename)s",
@@ -250,24 +292,33 @@ class YtdlpDownloader:
             args += ["--write-subs", "--sub-langs", ",".join(sorted({s["lang"] for s in subs})), "--sub-format", "vtt/best"]
             if any(s.get("auto") for s in subs):
                 args += ["--write-auto-subs"]
-        return [*args, job.url]
+        return [*args, url]
+
+    def _run(self, args: list[str]) -> int:
+        self._proc = subprocess.Popen(args, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
+                                      bufsize=1, errors="replace", **osutil.quiet())
+        for line in self._proc.stdout:
+            prog = parse_progress(line)
+            if prog:
+                name, dl, total, speed = prog
+                self._streams[name] = (dl, total)
+                self._speed = speed
+            elif line.startswith("WDDONE|"):
+                self._final = line.split("|", 1)[1].strip()
+            elif line.strip():
+                self._tail.append(line.strip())
+        return self._proc.wait()
 
     def _main(self) -> None:
         try:
             self.job.dest.parent.mkdir(parents=True, exist_ok=True)
-            self._proc = subprocess.Popen(self._args(), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                                          bufsize=1, errors="replace", **osutil.quiet())
-            for line in self._proc.stdout:
-                prog = parse_progress(line)
-                if prog:
-                    name, dl, total, speed = prog
-                    self._streams[name] = (dl, total)
-                    self._speed = speed
-                elif line.startswith("WDDONE|"):
-                    self._final = line.split("|", 1)[1].strip()
-                elif line.strip():
-                    self._tail.append(line.strip())
-            rc = self._proc.wait()
+            rc = self._run(self._args())
+            if (rc != 0 and not self._final and not self._stop.is_set()
+                    and any("Unsupported URL" in l for l in self._tail)):
+                stream = find_embedded_stream(self.job.url, self.job.headers)
+                if stream:                              # the page hides a plain stream: give that to yt-dlp
+                    self._tail.clear()
+                    rc = self._run(self._args(stream, self.job.url))
             if self._stop.is_set():
                 return                                   # paused/cancelled: partial files are kept for resume
             if self._final and Path(self._final).exists():

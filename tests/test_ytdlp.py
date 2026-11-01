@@ -79,3 +79,14 @@ def test_cookies_are_not_sent_to_youtube():
     assert "Cookie:SID=secret" not in " ".join(yt) and "--referer" in yt and "--user-agent" in yt
     other = ytdlp._common_args(h, "https://vimeo.com/123")
     assert "Cookie:SID=secret" in other                       # other sites may need the login
+
+
+def test_find_embedded_stream_reads_packed_player_script(monkeypatch):
+    import io
+    from warpdown import ytdlp
+    page = ("<script>eval(function(p,a,c,k,e,d){}('0 1={\"2\":\"3://4.5/6/7.8\"};',9,9,"
+            "'var|links|hls|https|cdn|example|v|master|m3u8'.split('|'),0,{}))</script>")
+    monkeypatch.setattr(ytdlp, "urlopen", lambda req, timeout=0: io.BytesIO(page.encode()))
+    assert ytdlp.find_embedded_stream("https://x.test/embed/1") == "https://cdn.example/v/master.m3u8"
+    monkeypatch.setattr(ytdlp, "urlopen", lambda req, timeout=0: io.BytesIO(b"<html>nothing</html>"))
+    assert ytdlp.find_embedded_stream("https://x.test/embed/1") is None
