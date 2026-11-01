@@ -285,3 +285,45 @@ def test_settings_dialog_saves_the_complete_action(env):
     d = gui.SettingsDialog(w, m)
     d.done.setCurrentIndex(d.done.findData(gui.DONE_OPEN_FOLDER))
     assert d.done.currentData() == gui.DONE_OPEN_FOLDER
+
+
+# ---------------------------------------------------------------- selecting with the mouse
+def test_drag_box_selects_rows_and_select_all(env, qapp):
+    from PySide6.QtCore import QPoint
+    from PySide6.QtTest import QTest
+    w, m, tmp = env
+    for n in range(6):
+        m.add(f"http://x/{n}.bin", str(tmp), start=False)
+    w.resize(900, 600)
+    w.show()
+    pump(qapp, 0.2)
+    t, vp = w.table, w.table.viewport()
+    assert t.model().rowCount() == 6
+    below = t.rowViewportPosition(5) + t.rowHeight(5) + 20            # empty space under the last row
+    assert below < vp.height()
+    top = t.rowViewportPosition(1) + 2
+    bottom = t.rowViewportPosition(3) + t.rowHeight(3) - 2
+    QTest.mousePress(vp, Qt.LeftButton, Qt.NoModifier, QPoint(vp.width() - 5, below))
+    QTest.mouseMove(vp, QPoint(vp.width() - 5, bottom))
+    QTest.mouseMove(vp, QPoint(vp.width() - 5, top))
+    QTest.mouseRelease(vp, Qt.LeftButton, Qt.NoModifier, QPoint(vp.width() - 5, top))
+    assert {i.row() for i in t.selectionModel().selectedRows()} == {1, 2, 3, 4, 5}
+    QTest.mouseClick(vp, Qt.LeftButton, Qt.NoModifier, QPoint(10, below))   # a click on empty space clears
+    assert not t.selectionModel().selectedRows()
+    t.setFocus()
+    QTest.keyClick(t, Qt.Key_A, Qt.ControlModifier)
+    assert len(t.selectionModel().selectedRows()) == 6
+
+
+def test_remove_all_finished_and_failed(env, monkeypatch):
+    from warpdown.manager import COMPLETED, ERROR
+    w, m, tmp = env
+    items = [m.add(f"http://x/{n}.bin", str(tmp), start=False) for n in range(4)]
+    ids = [it.id for it in items]
+    for it, st in zip(items, (COMPLETED, COMPLETED, ERROR, PAUSED)):
+        it.status = st
+    asked = []
+    monkeypatch.setattr(gui.MainWindow, "_remove", lambda self, found: asked.append(sorted(found)))
+    w._remove_where(COMPLETED, "finished")
+    w._remove_where(ERROR, "failed")
+    assert asked == [sorted(ids[:2]), [ids[2]]]

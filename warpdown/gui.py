@@ -9,14 +9,14 @@ import threading
 import time
 from pathlib import Path
 
-from PySide6.QtCore import (QAbstractTableModel, QEvent, QModelIndex, QRectF, QSettings, QSize, Qt, QTime, QTimer, QUrl,
+from PySide6.QtCore import (QAbstractTableModel, QEvent, QItemSelectionModel, QModelIndex, QPoint, QRect, QRectF, QSettings, QSize, Qt, QTime, QTimer, QUrl,
                             Signal)
 from PySide6.QtGui import (QAction, QColor, QDesktopServices, QFont, QFontDatabase, QFontMetrics, QGuiApplication, QIcon,
                            QKeySequence, QPainter, QPalette, QShortcut)
 from PySide6.QtWidgets import (
     QAbstractItemView, QApplication, QComboBox, QGroupBox, QVBoxLayout, QCheckBox, QDialog, QDialogButtonBox, QFileDialog,
     QFormLayout, QHBoxLayout, QHeaderView, QInputDialog, QLabel, QLineEdit, QListWidget, QListWidgetItem, QPlainTextEdit, QTimeEdit, QTreeWidget, QTreeWidgetItem,
-    QMainWindow, QMenu, QMessageBox, QPushButton, QSpinBox, QStyle, QStyledItemDelegate,
+    QMainWindow, QMenu, QMessageBox, QPushButton, QRubberBand, QSpinBox, QStyle, QStyledItemDelegate,
     QStyleOptionProgressBar, QSplitter, QSystemTrayIcon, QTableView, QToolBar, QWidget,
 )
 
@@ -260,6 +260,55 @@ class Model(QAbstractTableModel):
 from . import autostart, clipwatch, kdeconnect, osutil, updates
 from .app_icon import app_icon
 from .errors import explain, tooltip as error_tooltip
+
+
+class DownloadTable(QTableView):
+    """A table where dragging a box on the empty area (or between rows) selects every row the box touches.
+    Ctrl adds to the selection, a plain click on empty space clears it."""
+
+    def __init__(self):
+        super().__init__()
+        self._band = QRubberBand(QRubberBand.Rectangle, self.viewport())
+        self._origin: QPoint | None = None
+        self._base = None
+
+    def mousePressEvent(self, e):
+        if e.button() == Qt.LeftButton and not self.indexAt(e.position().toPoint()).isValid():
+            self._origin = e.position().toPoint()
+            ctrl = bool(e.modifiers() & Qt.ControlModifier)
+            self._base = self.selectionModel().selection() if ctrl else None
+            if not ctrl:
+                self.clearSelection()
+            self._band.setGeometry(QRect(self._origin, QSize()))
+            self._band.show()
+            e.accept()
+            return
+        super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self._origin is None:
+            super().mouseMoveEvent(e)
+            return
+        pos = e.position().toPoint()
+        box = QRect(self._origin, pos).normalized()
+        self._band.setGeometry(box)
+        sel = self.selectionModel()
+        sel.clearSelection()
+        if self._base is not None:
+            sel.select(self._base, QItemSelectionModel.Select)
+        for row in range(self.model().rowCount()):
+            r = QRect(0, self.rowViewportPosition(row), self.viewport().width(), self.rowHeight(row))
+            if r.intersects(box):
+                sel.select(self.model().index(row, 0), QItemSelectionModel.Select | QItemSelectionModel.Rows)
+        e.accept()
+
+    def mouseReleaseEvent(self, e):
+        if self._origin is not None:
+            self._origin = None
+            self._band.hide()
+            e.accept()
+            return
+        super().mouseReleaseEvent(e)
 
 
 class ProgressDelegate(QStyledItemDelegate):
@@ -1280,7 +1329,7 @@ class MainWindow(QMainWindow):
         self.setAcceptDrops(True)
         self.resize(1200, 620)
         self.model = Model(mgr)
-        self.table = QTableView()
+        self.table = DownloadTable()
         self.table.setModel(self.model)
         self.table.setItemDelegateForColumn(2, ProgressDelegate(self.table))
         self.table.setSelectionBehavior(QAbstractItemView.SelectRows)
@@ -1298,6 +1347,7 @@ class MainWindow(QMainWindow):
         self.table.doubleClicked.connect(self._open_file)
         self.table.setContextMenuPolicy(Qt.CustomContextMenu)
         self.table.customContextMenuRequested.connect(self._menu)
+        QShortcut(QKeySequence.SelectAll, self.table, context=Qt.WidgetShortcut, activated=self.table.selectAll)
 
         self.cats = QListWidget()
         self.cats.addItems(CATS)
@@ -1808,7 +1858,9 @@ class MainWindow(QMainWindow):
             d.deleteLater()      # gone for good once the dialog is closed (nothing may keep it alive)
 
     def delete_selected(self):
-        ids = self._selected_ids()
+        self._remove(self._selected_ids())
+
+    def _remove(self, ids):
         if not ids:
             return
         box = QMessageBox(QMessageBox.Question, "Delete", f"Remove {len(ids)} download(s)?", parent=self)
@@ -1819,6 +1871,18 @@ class MainWindow(QMainWindow):
         if box.clickedButton() in (keep, wipe):
             for iid in ids:
                 self.mgr.remove(iid, delete_files=box.clickedButton() is wipe)
+
+    def _remove_where(self, status, what):
+        ids = [i for i, it in self.mgr.items.items() if it.status == status]
+        if ids:
+            self._remove(ids)
+        else:
+            QMessageBox.information(self, "Delete", f"There are no {what} downloads.")
+
+    def _add_bulk_actions(self, m):
+        m.addAction("Select all", self.table.selectAll).setShortcut(QKeySequence.SelectAll)
+        m.addAction("Remove all finished…", lambda: self._remove_where(COMPLETED, "finished"))
+        m.addAction("Remove all failed…", lambda: self._remove_where(ERROR, "failed"))
 
     def settings_dialog(self):
         original_font = saved_font_size()
@@ -1869,10 +1933,12 @@ class MainWindow(QMainWindow):
 
     def _menu(self, pos):
         idx = self.table.indexAt(pos)
+        m = QMenu(self)
         if not idx.isValid():
+            self._add_bulk_actions(m)
+            m.exec(self.table.viewport().mapToGlobal(pos))
             return
         it = self.model.item(idx.row())
-        m = QMenu(self)
         if it.status == COMPLETED:
             m.addAction("Open", lambda: self._open_file(idx))
         if it.directory:
@@ -1904,6 +1970,7 @@ class MainWindow(QMainWindow):
             m.addAction("Copy error details", lambda: QGuiApplication.clipboard().setText(f"{it.error}\n{it.url}"))
         m.addSeparator()
         m.addAction("Delete…", self.delete_selected)
+        self._add_bulk_actions(m)
         m.exec(self.table.viewport().mapToGlobal(pos))
 
     def _update_status(self, *_):
