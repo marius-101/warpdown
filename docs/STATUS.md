@@ -3,7 +3,7 @@
 Read this first when starting a new session. Update it at the end of each piece of work.
 
 ## Current release
-**0.9.0** (25 Oct 2026) is the last published release; 0.9.2 is being released (the unpublished 0.9.1 draft was replaced by it).
+**0.9.2** (31 Oct 2026) is the last published release; 0.9.3 is being released.
 
 ## Done
 - Download engine, HLS, subtitles, yt-dlp support, checksum verification, signed Firefox add-on (0.8.0).
@@ -20,6 +20,10 @@ Read this first when starting a new session. Update it at the end of each piece 
     no magnet/`.torrent` registrations. Do not add it back. Unfinished torrent entries from older versions are dropped on load.
   - *When a download completes* setting (notification, click shows the folder, optional open file / folder).
   - The last table column (Added) stretches, so narrowing another column leaves no empty header area (its right edge cannot be dragged).
+- 0.9.3 (version bumped; tag v0.9.3 builds the release):
+  - Embed pages yt-dlp has no extractor for (packed player scripts, e.g. dhtpre.com): Warpdown finds the .m3u8/.mp4 in the page.
+  - Drag a box on empty space in the list to select rows; Ctrl+A; "Remove all finished / failed" in the right-click menu.
+  - Tests use a throwaway data/config folder (they used to write into the real download list).
 
 ## Next
 - Try the `.deb` and Flatpak on a real install (not yet tested by the user).
