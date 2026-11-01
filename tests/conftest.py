@@ -5,6 +5,18 @@ from PySide6.QtCore import QEvent
 from PySide6.QtWidgets import QApplication
 
 
+@pytest.fixture(scope="session", autouse=True)
+def _isolated_home(tmp_path_factory):
+    """Tests must never touch the real download list, statistics or settings of whoever runs them."""
+    mp = pytest.MonkeyPatch()
+    home = tmp_path_factory.mktemp("home")
+    for var, sub in (("XDG_DATA_HOME", "data"), ("XDG_CONFIG_HOME", "config"), ("XDG_CACHE_HOME", "cache"),
+                     ("XDG_DOWNLOAD_DIR", "Downloads")):
+        mp.setenv(var, str(home / sub))
+    yield
+    mp.undo()
+
+
 @pytest.fixture(scope="session")
 def qapp():
     return QApplication.instance() or QApplication([])
